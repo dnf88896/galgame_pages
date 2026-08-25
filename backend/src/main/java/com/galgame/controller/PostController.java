@@ -1,0 +1,395 @@
+package com.galgame.controller;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+
+import com.galgame.auth.AuthContext;
+import com.galgame.auth.TokenService;
+import com.galgame.constants.TagConstants;
+import com.galgame.dao.AttachmentDao;
+import com.galgame.dao.BlockDao;
+import com.galgame.dao.PostDao;
+import com.galgame.dao.ReplyDao;
+import com.galgame.dao.UserDao;
+import com.galgame.model.Attachment;
+import com.galgame.model.LikeResult;
+import com.galgame.model.Post;
+import com.galgame.model.PostFilter;
+import com.galgame.model.Reply;
+import com.galgame.model.User;
+import com.galgame.service.MentionService;
+
+import jakarta.servlet.http.HttpServletRequest;
+
+/**
+ * 帖子接口。对应 Python 版 server.py 的帖子相关路由。
+ */
+@RestController
+@RequestMapping("/api/posts")
+public class PostController {
+
+    private static final long MAX_UPLOAD_BYTES = 250L * 1024 * 1024;
+
+    private final PostDao postDao;
+    private final ReplyDao replyDao;
+    private final AttachmentDao attachmentDao;
+    private final UserDao userDao;
+    private final TokenService tokenService;
+    private final BlockDao blockDao;
+    private final MentionService mentionService;
+
+    public PostController(PostDao postDao, ReplyDao replyDao, AttachmentDao attachmentDao,
+                          UserDao userDao, TokenService tokenService, BlockDao blockDao,
+                          MentionService mentionService) {
+        this.postDao = postDao;
+        this.replyDao = replyDao;
+        this.attachmentDao = attachmentDao;
+        this.userDao = userDao;
+        this.tokenService = tokenService;
+        this.blockDao = blockDao;
+        this.mentionService = mentionService;
+    }
+
+    /** 1. 帖子列表（公开），?q= 关键词搜索、?category= 分区过滤、?section= 小分支过滤，均可选 */
+    @GetMapping
+    public ResponseEntity<Object> list(
+            @RequestParam(value = "q", required = false) String q,
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "section", required = false) String section,
+            HttpServletRequest request) {
+        PostFilter filter = PostFilter.of(q, category, section);
+        // 屏蔽是双向的：不可见作者 = 我屏蔽的人 ∪ 屏蔽我的人；未登录则为空集合
+        Optional<Long> uid = tokenService.resolveUserId(request.getHeader("Authorization"));
+        Set<Long> hidden = new HashSet<>();
+        if (uid.isPresent()) {
+            hidden.addAll(blockDao.findBlockedUserIds(uid.get()));
+            hidden.addAll(blockDao.findBlockers(uid.get()));
+        }
+        List<Post> posts = postDao.findAll(filter, hidden);
+        if (posts.isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+        List<Long> ids = posts.stream().map(Post::id).toList();
+        Map<Long, List<Attachment>> attachmentsByPost = attachmentDao.findByPostIds(ids);
+        List<Post> result = posts.stream()
+                .map(p -> p.withContext(null, attachmentsByPost.getOrDefault(p.id(), List.of()), null))
+                .toList();
+        return ResponseEntity.ok(result);
+    }
+
+    /** 2. 帖子详情（公开，可选登录）：先 +view 再读；liked 按当前用户计算 */
+    @GetMapping("/{id}")
+    public ResponseEntity<Object> getById(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+        Optional<Long> currentUserId = tokenService.resolveUserId(request.getHeader("Authorization"));
+        Optional<Post> opt = postDao.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        Post post = opt.get();
+        // 双方任一方向屏蔽 → 帖子视为不存在
+        if (currentUserId.isPresent() && post.userId() != null) {
+            long uid = currentUserId.get();
+            if (blockDao.isBlocked(uid, post.userId()) || blockDao.isBlocked(post.userId(), uid)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+            }
+        }
+        postDao.incrementView(id);
+        // 重新读取以拿到最新 view_count
+        opt = postDao.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        post = opt.get();
+
+        List<Attachment> attachments = attachmentDao.findByPostId(id);
+        List<Reply> replies = replyDao.findByPostId(id);
+
+        boolean liked = false;
+        Set<Long> likedReplyIds = new HashSet<>();
+        if (currentUserId.isPresent()) {
+            long uid = currentUserId.get();
+            liked = postDao.isLiked(id, uid);
+            if (!replies.isEmpty()) {
+                likedReplyIds = replyDao.findLikedReplyIds(replies.stream().map(Reply::id).toList(), uid);
+            }
+        }
+        final Set<Long> likedSet = likedReplyIds;
+        List<Reply> repliesWithLiked = replies.stream()
+                .map(r -> r.withLiked(likedSet.contains(r.id())))
+                .toList();
+
+        return ResponseEntity.ok(post.withContext(liked, attachments, repliesWithLiked));
+    }
+
+    /** 3a. 新建帖子（需登录，multipart/form-data，可带多个 attachments 文件） */
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Object> createMultipart(
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "sections", required = false) List<String> sections,
+            @RequestParam(value = "section", required = false) String section,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "content", required = false) String content,
+            @RequestParam(value = "attachments", required = false) MultipartFile[] attachments,
+            HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        return doCreatePost(category, sections, section, title, content, attachments, userId);
+    }
+
+    /** 3b. 新建帖子（需登录，application/json，忽略附件） */
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Object> createJson(@RequestBody(required = false) CreatePostRequest body,
+                                             HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        String category = body == null ? null : body.category();
+        List<String> sections = body == null ? null : body.sections();
+        String section = body == null ? null : body.section();
+        String title = body == null ? null : body.title();
+        String content = body == null ? null : body.content();
+        return doCreatePost(category, sections, section, title, content, null, userId);
+    }
+
+    /** 4a. 回复帖子（需登录，multipart/form-data） */
+    @PostMapping(value = "/{id}/replies", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Object> createReplyMultipart(
+            @PathVariable Long id,
+            @RequestParam(value = "content", required = false) String content,
+            @RequestParam(value = "parent_id", required = false) Long parentId,
+            HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        return doCreateReply(id, content, userId, parentId);
+    }
+
+    /** 4b. 回复帖子（需登录，application/json） */
+    @PostMapping(value = "/{id}/replies", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Object> createReplyJson(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body,
+            HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        Object contentObj = body == null ? null : body.get("content");
+        String content = contentObj == null ? null : contentObj.toString();
+        Long parentId = null;
+        if (body != null && body.get("parent_id") != null) {
+            if (body.get("parent_id") instanceof Number n) {
+                parentId = n.longValue();
+            } else {
+                return ResponseEntity.badRequest().body(Map.of("error", "无效的 parent_id。"));
+            }
+        }
+        return doCreateReply(id, content, userId, parentId);
+    }
+
+    /** 5. 帖子点赞 toggle（需登录，按 user_id 去重） */
+    @PostMapping("/{id}/like")
+    public ResponseEntity<Object> togglePostLike(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        Optional<LikeResult> result = postDao.toggleLike(id, userId);
+        if (result.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        return ResponseEntity.ok(Map.<String, Object>of("liked", result.get().liked(), "like_count", result.get().likeCount()));
+    }
+
+    /** 6. 删除自己的帖子（需登录 + 作者本人） */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Object> deletePost(@PathVariable Long id, HttpServletRequest request) {
+        if (!postDao.existsById(id)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        // 该路径未注册到鉴权拦截器，这里手动解析 token 判定登录
+        Optional<Long> userId = tokenService.resolveUserId(request.getHeader("Authorization"));
+        if (userId.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
+        }
+        if (!postDao.deleteByIdAndUser(id, userId.get())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "只能删除自己发布的帖子。"));
+        }
+        deleteAttachmentFiles(id);
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    /** 删除帖子附件的本地文件目录 uploads/post_<id>/（数据库记录由外键级联删除） */
+    private void deleteAttachmentFiles(Long postId) {
+        Path dir = Path.of("uploads/post_" + postId);
+        if (!Files.exists(dir)) {
+            return;
+        }
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException ignored) {
+                            // 单个文件删除失败不影响主流程
+                        }
+                    });
+        } catch (IOException ignored) {
+            // 目录不存在/遍历失败时静默忽略
+        }
+    }
+
+    // ── 私有辅助 ─────────────────────────────
+
+    private ResponseEntity<Object> doCreatePost(String categoryRaw, List<String> sectionsRaw, String sectionRaw,
+                                                String titleRaw, String contentRaw, MultipartFile[] files,
+                                                long userId) {
+        String title = titleRaw == null ? "" : titleRaw.trim();
+        String content = contentRaw == null ? "" : contentRaw.trim();
+        if (title.isEmpty() || content.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "标题和正文不能为空。"));
+        }
+        User user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        String author = user.username();
+        // 多标签：sections 数组优先，其次兼容单值 section，均无则为空数组；LinkedHashSet 去重保序
+        List<String> merged = new ArrayList<>();
+        if (sectionsRaw != null && !sectionsRaw.isEmpty()) {
+            for (String s : sectionsRaw) {
+                if (s != null) {
+                    merged.add(s.trim());
+                }
+            }
+        } else if (sectionRaw != null && !sectionRaw.isBlank()) {
+            merged.add(sectionRaw.trim());
+        }
+        List<String> tags = new ArrayList<>(new LinkedHashSet<>(merged));
+        for (String tag : tags) {
+            if (!TagConstants.isSectionKey(tag)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "无效的标签。"));
+            }
+        }
+        String category = categoryRaw == null || categoryRaw.isBlank() ? "话题" : categoryRaw.trim();
+        if (title.length() > 80 || content.length() > 2000 || category.length() > 32) {
+            return ResponseEntity.badRequest().body(Map.of("error", "字段长度超出限制。"));
+        }
+        long totalSize = 0;
+        if (files != null) {
+            for (MultipartFile f : files) {
+                if (f != null && !f.isEmpty()) {
+                    totalSize += f.getSize();
+                }
+            }
+        }
+        if (totalSize > MAX_UPLOAD_BYTES) {
+            return ResponseEntity.badRequest().body(Map.of("error", "附件总大小超出限制。"));
+        }
+
+        Long postId = postDao.insert(author, category, title, content, userId, tags);
+        saveAttachments(postId, files);
+        // 从 DB 回查，保证附件 id / created_at 为数据库真实值
+        List<Attachment> attachments = attachmentDao.findByPostId(postId);
+        Optional<Post> opt = postDao.findById(postId);
+        Post post = opt.orElseThrow(() -> new IllegalStateException("写入的帖子读取失败"));
+        mentionService.notifyMention(userId, postId, null, title, content);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(post.withContext(false, attachments, List.of()));
+    }
+
+    private ResponseEntity<Object> doCreateReply(Long postId, String contentRaw, long userId, Long parentId) {
+        if (!postDao.existsById(postId)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        User user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        String author = user.username();
+        String content = contentRaw == null ? "" : contentRaw.trim();
+        if (content.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "回复内容不能为空。"));
+        }
+        if (content.length() > 2000) {
+            return ResponseEntity.badRequest().body(Map.of("error", "字段长度超出限制。"));
+        }
+        String parentAuthor = null;
+        if (parentId != null) {
+            Optional<Reply> parent = replyDao.findById(parentId);
+            if (parent.isEmpty() || !parent.get().postId().equals(postId)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "父回复不存在。"));
+            }
+            // 嵌套回复：快照父回复的作者名，父评论被删后子回复仍能显示「回复 @xx」
+            parentAuthor = parent.get().author();
+        }
+        Long replyId = replyDao.insert(postId, author, content, userId, parentId, parentAuthor);
+        postDao.incrementReplyCount(postId);
+        mentionService.notifyMention(userId, postId, replyId, null, content);
+        Reply reply = replyDao.findById(replyId).orElseThrow(() -> new IllegalStateException("写入的回复读取失败"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(reply);
+    }
+
+    private void saveAttachments(Long postId, MultipartFile[] files) {
+        if (files == null || files.length == 0) {
+            return;
+        }
+        try {
+            String dirName = "uploads/post_" + postId;
+            Path postDir = Path.of(dirName);
+            Files.createDirectories(postDir);
+            for (MultipartFile file : files) {
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+                String originalName = sanitizeFilename(file.getOriginalFilename());
+                String storedName = String.format("%08d_%s_%s_%s", postId, nowToken(),
+                        UUID.randomUUID().toString().replace("-", ""), originalName);
+                Path target = postDir.resolve(storedName);
+                file.transferTo(target);
+                String mime = file.getContentType();
+                String urlPath = "/uploads/post_" + postId + "/" + storedName;
+                attachmentDao.insert(postId, originalName, storedName, mime, file.getSize(), urlPath);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("附件保存失败", e);
+        }
+    }
+
+    /** 文件名净化：取 basename，非法字符替换为 _，最长 100 */
+    private String sanitizeFilename(String name) {
+        String base;
+        if (name == null || name.isBlank()) {
+            base = "file";
+        } else {
+            String normalized = name.replace('\\', '/');
+            int idx = normalized.lastIndexOf('/');
+            base = (idx >= 0) ? normalized.substring(idx + 1) : normalized;
+            base = base.trim();
+            if (base.isEmpty()) {
+                base = "file";
+            }
+        }
+        base = base.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_");
+        if (base.length() > 100) {
+            base = base.substring(0, 100);
+        }
+        return base;
+    }
+
+    private String nowToken() {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSSSSS"));
+    }
+}
