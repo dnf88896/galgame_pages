@@ -3,8 +3,10 @@ package com.galgame.controller;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,6 +29,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 import com.galgame.auth.TokenService;
 import com.galgame.constants.TagConstants;
 import com.galgame.dao.GalgameDao;
@@ -50,34 +54,49 @@ public class GalgameController {
     private final GalgameDao galgameDao;
     private final UserDao userDao;
     private final TokenService tokenService;
+    private final JsonMapper objectMapper;
 
-    public GalgameController(GalgameDao galgameDao, UserDao userDao, TokenService tokenService) {
+    public GalgameController(GalgameDao galgameDao, UserDao userDao, TokenService tokenService, JsonMapper objectMapper) {
         this.galgameDao = galgameDao;
         this.userDao = userDao;
         this.tokenService = tokenService;
+        this.objectMapper = objectMapper;
     }
 
-    /** 新建 galgame 请求体（links 每项 {label,url}；tags 为 gg-* 标签数组） */
+    /** 新建 galgame 请求体（links 每项 {label,url}；tags 为 gg-* 标签数组；releaseDate 格式 YYYY-MM-DD，可空。rating 由用户评分产生，本接口不接收） */
     public record GalgameRequest(String name, String description, String image, String staff,
+                                 String releaseDate,
                                  List<Galgame.Link> links, List<String> tags) {
     }
 
-    /** 1. 作品列表（公开），?q= 名称模糊、?tags= 多标签（逗号分隔或重复参数，AND 语义），均可选 */
+    /** 1. 作品列表（公开），?q= 名称模糊、?tags= 多标签（逗号分隔或重复参数，AND 语义）、?sort= 排序（created 默认/views/release_date/rating），均可选 */
     @GetMapping
     public ResponseEntity<Object> list(
             @RequestParam(value = "q", required = false) String q,
-            @RequestParam(value = "tags", required = false) List<String> tags) {
-        return ResponseEntity.ok(galgameDao.findAll(trimToNull(q), tags));
+            @RequestParam(value = "tags", required = false) List<String> tags,
+            @RequestParam(value = "sort", required = false) String sort) {
+        return ResponseEntity.ok(galgameDao.findAll(trimToNull(q), tags, sort));
     }
 
-    /** 2. 作品详情（公开） */
+    /** 2. 作品详情（公开）：访问 +1 浏览数，返回最新 view_count；带登录态时附 rated（当前用户是否已评分） */
     @GetMapping("/{id}")
-    public ResponseEntity<Object> getById(@PathVariable Long id) {
+    public ResponseEntity<Object> getById(@PathVariable Long id, HttpServletRequest request) {
         Optional<Galgame> opt = galgameDao.findById(id);
         if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
         }
-        return ResponseEntity.ok(opt.get());
+        galgameDao.incrementView(id);
+        Galgame saved = galgameDao.findById(id)
+                .orElseThrow(() -> new IllegalStateException("浏览计数后的 galgame 读取失败"));
+        boolean rated = false;
+        Optional<Long> uid = currentUserId(request);
+        if (uid.isPresent()) {
+            rated = galgameDao.hasRated(id, uid.get());
+        }
+        // convertValue 按全局 SNAKE_CASE 序列化 record → snake_case 键（release_date / rating_avg / rating_count），再附 rated
+        Map<String, Object> map = objectMapper.convertValue(saved, new TypeReference<Map<String, Object>>() {});
+        map.put("rated", rated);
+        return ResponseEntity.ok(map);
     }
 
     /** 3. 添加作品（管理员，JSON body） */
@@ -108,7 +127,7 @@ public class GalgameController {
             return result.error();
         }
         NormalizedGalgameRequest n = result.value();
-        if (!galgameDao.update(id, n.name(), n.description(), n.image(), n.staff(), n.links(), n.tags())) {
+        if (!galgameDao.update(id, n.name(), n.description(), n.image(), n.staff(), n.releaseDate(), n.links(), n.tags())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
         }
         // 从 DB 回查，保证 updated_at 为数据库真实值
@@ -163,6 +182,34 @@ public class GalgameController {
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
+    /** 7. 用户评分（任意登录用户，管理员/普通同权限）：body {score: number}，0~10 分，一人一票 */
+    @PostMapping("/{id}/rating")
+    public ResponseEntity<Object> rate(@PathVariable Long id,
+                                       @RequestBody(required = false) Map<String, Object> body,
+                                       HttpServletRequest request) {
+        Optional<Long> uid = currentUserId(request);
+        if (uid.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
+        }
+        if (!galgameDao.existsById(id)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+        }
+        Double score = body == null ? null : asDouble(body.get("score"));
+        if (score == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "请输入评分。"));
+        }
+        if (score < 0 || score > 10) {
+            return ResponseEntity.badRequest().body(Map.of("error", "评分需在 0~10 分之间。"));
+        }
+        if (galgameDao.rate(id, uid.get(), score) == 1) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "你已经评过分了。"));
+        }
+        // 从 DB 回查，返回最新 rating_avg / rating_count
+        Galgame saved = galgameDao.findById(id)
+                .orElseThrow(() -> new IllegalStateException("评分后的 galgame 读取失败"));
+        return ResponseEntity.ok(saved);
+    }
+
     // ── 私有辅助 ─────────────────────────────
 
     private ResponseEntity<Object> doCreate(GalgameRequest body, long adminId) {
@@ -171,7 +218,7 @@ public class GalgameController {
             return result.error();
         }
         NormalizedGalgameRequest n = result.value();
-        Long galgameId = galgameDao.insert(n.name(), n.description(), n.image(), n.staff(), n.links(), n.tags(), adminId);
+        Long galgameId = galgameDao.insert(n.name(), n.description(), n.image(), n.staff(), n.releaseDate(), n.links(), n.tags(), adminId);
         // 从 DB 回查，保证 created_at / updated_at / id 为数据库真实值
         Galgame saved = galgameDao.findById(galgameId)
                 .orElseThrow(() -> new IllegalStateException("写入的 galgame 读取失败"));
@@ -180,6 +227,7 @@ public class GalgameController {
 
     /** 校验通过的规范化请求体：create 与 update 共用 */
     private record NormalizedGalgameRequest(String name, String description, String image, String staff,
+                                            LocalDate releaseDate,
                                             List<Galgame.Link> links, List<String> tags) {
     }
 
@@ -211,6 +259,16 @@ public class GalgameController {
         if (image != null && image.length() > 500) {
             return new ValidationResult(ResponseEntity.badRequest().body(Map.of("error", "字段长度超出限制。")), null);
         }
+        // releaseDate 可选：非空时须为 YYYY-MM-DD；rating 不在此接收（由用户评分产生，管理员不可写）
+        LocalDate releaseDate = null;
+        String releaseDateRaw = body == null ? null : trimToNull(body.releaseDate());
+        if (releaseDateRaw != null) {
+            try {
+                releaseDate = LocalDate.parse(releaseDateRaw);
+            } catch (DateTimeParseException e) {
+                return new ValidationResult(ResponseEntity.badRequest().body(Map.of("error", "发售日期格式应为 YYYY-MM-DD。")), null);
+            }
+        }
         List<Galgame.Link> links = body == null ? List.of() : (body.links() == null ? List.of() : body.links());
         for (Galgame.Link link : links) {
             if (link == null) {
@@ -230,7 +288,7 @@ public class GalgameController {
                 return new ValidationResult(ResponseEntity.badRequest().body(Map.of("error", "无效的标签。")), null);
             }
         }
-        return new ValidationResult(null, new NormalizedGalgameRequest(name, description, image, staff, links, tags));
+        return new ValidationResult(null, new NormalizedGalgameRequest(name, description, image, staff, releaseDate, links, tags));
     }
 
     /** 管理员守卫：未登录 401，已登录但 admin_level<=0 403；通过返回 null */
@@ -276,6 +334,28 @@ public class GalgameController {
 
     private String nowToken() {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSSSSS"));
+    }
+
+    /** 评分值解析：Integer/Double/BigDecimal 等 Number 或数字字符串 → Double；null / 空 / 非法返回 null */
+    private Double asDouble(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (v instanceof String s) {
+            String t = trimToNull(s);
+            if (t == null) {
+                return null;
+            }
+            try {
+                return Double.parseDouble(t);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private String trimToNull(String s) {

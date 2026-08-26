@@ -47,6 +47,16 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "CONSTRAINT fk_post_favorites_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+    private static final String GALGAME_RATINGS_DDL =
+            "CREATE TABLE galgame_ratings ("
+                    + "galgame_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (galgame_id, user_id), "
+                    + "KEY idx_galgame_ratings_user (user_id), "
+                    + "CONSTRAINT fk_galgame_ratings_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_galgame_ratings_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
     private static final String REPORTS_DDL =
             "CREATE TABLE reports ("
                     + "id BIGINT NOT NULL AUTO_INCREMENT, "
@@ -105,6 +115,9 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("reports", "status", "TINYINT NOT NULL DEFAULT 0");
         ensureColumn("reports", "handled_at", "DATETIME NULL");
         ensureColumn("reports", "result", "VARCHAR(50) NULL");
+        ensureColumn("galgames", "view_count", "INT NOT NULL DEFAULT 0");
+        ensureColumn("galgames", "release_date", "DATE NULL");
+        migrateGalgameRating();
 
         recomputeLikeCounts();
     }
@@ -130,6 +143,26 @@ public class DatabaseMigrator implements ApplicationRunner {
             jdbcTemplate.execute("DROP TABLE " + table);
             jdbcTemplate.execute(createDdl);
         }
+    }
+
+    /**
+     * Galgame 评分（一人一票）：
+     * <ul>
+     *   <li>旧库 galgames.rating(DECIMAL(3,1)，未使用过) 迁移为 rating_avg(DECIMAL(4,2)，存精确两位小数)，新库直接建；</li>
+     *   <li>新增 rating_count(评分人数)；</li>
+     *   <li>确保 galgame_ratings 防重表存在（schema.sql 已建，这里兜底旧库），只存 (galgame_id, user_id) 不含分数。</li>
+     * </ul>
+     */
+    private void migrateGalgameRating() {
+        if (!columnExists("galgames", "rating_avg")) {
+            if (columnExists("galgames", "rating")) {
+                jdbcTemplate.execute("ALTER TABLE galgames CHANGE COLUMN rating rating_avg DECIMAL(4,2) NULL COMMENT '评分平均分（用户评分汇总，管理员不可写）'");
+            } else {
+                jdbcTemplate.execute("ALTER TABLE galgames ADD COLUMN rating_avg DECIMAL(4,2) NULL COMMENT '评分平均分（用户评分汇总，管理员不可写）'");
+            }
+        }
+        ensureColumn("galgames", "rating_count", "INT NOT NULL DEFAULT 0");
+        ensureLikeTable("galgame_ratings", GALGAME_RATINGS_DDL);
     }
 
     private void ensureColumn(String table, String column, String ddl) {

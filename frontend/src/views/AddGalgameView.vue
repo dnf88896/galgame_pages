@@ -73,6 +73,16 @@
             />
           </el-form-item>
 
+          <el-form-item label="发售日期">
+            <el-date-picker
+              v-model="form.releaseDate"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择发售日期"
+              class="add-date-picker"
+            />
+          </el-form-item>
+
           <el-form-item label="资源链接">
             <div class="add-links">
               <div v-for="(link, i) in links" :key="i" class="add-link-row">
@@ -126,6 +136,7 @@ const form = reactive({
   image: '',
   description: '',
   staff: '',
+  releaseDate: '',
 })
 const links = ref([{ label: '', url: '' }])
 const imagePreview = ref('')
@@ -200,6 +211,7 @@ async function submit() {
     description: form.description.trim(),
     image: form.image,
     staff: form.staff.trim(),
+    release_date: form.releaseDate || null,
     links: links.value
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
       .filter((l) => l.url),
@@ -260,6 +272,9 @@ onMounted(async () => {
   color: #606266;
 }
 .add-tags-select {
+  width: 100%;
+}
+.add-date-picker {
   width: 100%;
 }
 .add-cover {

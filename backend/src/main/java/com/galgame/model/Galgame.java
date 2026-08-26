@@ -1,12 +1,14 @@
 package com.galgame.model;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
 /**
  * Galgame 作品实体，对应 galgames 表。
  * <p>json 输出为 snake_case（由全局 Jackson 配置控制）；
- * links / tags 恒非 null（无数据时为空数组）；createdBy 在作者被删除后为 null。
+ * links / tags 恒非 null（无数据时为空数组）；createdBy 在作者被删除后为 null；
+ * ratingAvg 为评分平均分（null=暂无评分），ratingCount 为评分人数（一人一票）。
  */
 public record Galgame(
         Long id,
@@ -18,7 +20,11 @@ public record Galgame(
         List<String> tags,
         Long createdBy,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        Long viewCount,
+        LocalDate releaseDate,
+        Double ratingAvg,
+        Long ratingCount) {
 
     /** 资源链接：[{label,url}] */
     public record Link(String label, String url) {

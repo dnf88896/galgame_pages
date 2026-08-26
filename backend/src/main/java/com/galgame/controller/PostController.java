@@ -76,15 +76,16 @@ public class PostController {
         this.mentionService = mentionService;
     }
 
-    /** 1. 帖子列表（公开），?q= 关键词、?category= 分区、?sections= 多标签（逗号分隔或重复参数，AND 语义，可配合旧 ?section=），均可选 */
+    /** 1. 帖子列表（公开），?q= 关键词、?category= 分区、?sections= 多标签（逗号分隔或重复参数，AND 语义，可配合旧 ?section=）、?sort= 排序（time 默认/hot/likes/following），均可选 */
     @GetMapping
     public ResponseEntity<Object> list(
             @RequestParam(value = "q", required = false) String q,
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "section", required = false) String section,
             @RequestParam(value = "sections", required = false) List<String> sections,
+            @RequestParam(value = "sort", required = false) String sort,
             HttpServletRequest request) {
-        PostFilter filter = PostFilter.of(q, category, section, sections);
+        PostFilter filter = PostFilter.of(q, category, section, sections, sort);
         // 屏蔽是双向的：不可见作者 = 我屏蔽的人 ∪ 屏蔽我的人；未登录则为空集合
         Optional<Long> uid = tokenService.resolveUserId(request.getHeader("Authorization"));
         Set<Long> hidden = new HashSet<>();
@@ -92,7 +93,7 @@ public class PostController {
             hidden.addAll(blockDao.findBlockedUserIds(uid.get()));
             hidden.addAll(blockDao.findBlockers(uid.get()));
         }
-        List<Post> posts = postDao.findAll(filter, hidden);
+        List<Post> posts = postDao.findAll(filter, hidden, uid.orElse(null));
         if (posts.isEmpty()) {
             return ResponseEntity.ok(List.of());
         }

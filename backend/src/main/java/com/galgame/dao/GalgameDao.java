@@ -4,11 +4,13 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -24,12 +26,14 @@ import com.galgame.model.Galgame;
  * Galgame 作品库数据访问层。使用 JdbcTemplate 访问 MySQL。
  * <p>links 以 JSON 数组文本（[{label,url}]）存 galgames.links，读写用注入的 JsonMapper（Jackson 3）序列化/反序列化；
  * tags 走 galgame_tags 多对多关联表，查询时用 GROUP_CONCAT 子查询一次取回整行标签（按 section_key 排序）。
+ * <p>评分：rating_avg / rating_count 存于 galgames，一人一票由防重表 galgame_ratings（主键 galgame_id+user_id）保证；
+ * rate() 先插防重表，捕获 DuplicateKeyException（org.springframework.dao）判定已评过。
  */
 @Repository
 public class GalgameDao {
 
     private static final String BASE_COLUMNS =
-            "g.id, g.name, g.description, g.image, g.staff, g.links, g.created_by, g.created_at, g.updated_at, "
+            "g.id, g.name, g.description, g.image, g.staff, g.view_count, g.release_date, g.rating_avg, g.rating_count, g.links, g.created_by, g.created_at, g.updated_at, "
             + "(SELECT GROUP_CONCAT(section_key ORDER BY section_key) FROM galgame_tags gt "
             + "WHERE gt.galgame_id = g.id) AS tags";
 
@@ -48,12 +52,12 @@ public class GalgameDao {
      * 主表与 galgame_tags 在同一事务。
      */
     @Transactional
-    public Long insert(String name, String description, String image, String staff,
+    public Long insert(String name, String description, String image, String staff, LocalDate releaseDate,
                        List<Galgame.Link> links, List<String> tags, long createdBy) {
         // Jackson 3 writeValueAsString 抛运行时异常，无需（也无法）捕获受检 IOException
         String linksJson = (links == null || links.isEmpty()) ? "[]" : objectMapper.writeValueAsString(links);
-        String sql = "INSERT INTO galgames (name, description, image, staff, links, created_by) "
-                + "VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO galgames (name, description, image, staff, release_date, links, created_by) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
@@ -61,8 +65,9 @@ public class GalgameDao {
             ps.setString(2, description);
             ps.setString(3, image);
             ps.setString(4, staff);
-            ps.setString(5, linksJson);
-            ps.setLong(6, createdBy);
+            ps.setDate(5, releaseDate == null ? null : java.sql.Date.valueOf(releaseDate));
+            ps.setString(6, linksJson);
+            ps.setLong(7, createdBy);
             return ps;
         }, keyHolder);
         Long galgameId = keyHolder.getKey().longValue();
@@ -75,13 +80,14 @@ public class GalgameDao {
      * tags 先清空再按新值全量写入，与主表同事务；updated_at 由数据库 ON UPDATE CURRENT_TIMESTAMP 自动刷新。
      */
     @Transactional
-    public boolean update(long id, String name, String description, String image, String staff,
+    public boolean update(long id, String name, String description, String image, String staff, LocalDate releaseDate,
                           List<Galgame.Link> links, List<String> tags) {
         // Jackson 3 writeValueAsString 抛运行时异常，无需（也无法）捕获受检 IOException
         String linksJson = (links == null || links.isEmpty()) ? "[]" : objectMapper.writeValueAsString(links);
         int rows = jdbcTemplate.update(
-                "UPDATE galgames SET name = ?, description = ?, image = ?, staff = ?, links = ? WHERE id = ?",
-                name, description, image, staff, linksJson, id);
+                "UPDATE galgames SET name = ?, description = ?, image = ?, staff = ?, release_date = ?, links = ? WHERE id = ?",
+                name, description, image, staff,
+                releaseDate == null ? null : java.sql.Date.valueOf(releaseDate), linksJson, id);
         if (rows == 0) {
             return false;
         }
@@ -100,9 +106,11 @@ public class GalgameDao {
     /**
      * Galgame 列表。按条件动态拼接 WHERE：q 只按名称模糊匹配（作者/内容不搜）；
      * tags 为 gg-* 资源筛选标签，AND 语义：每标签一条 EXISTS 判断，
-     * 一作须同时拥有所有指定标签；均无条件则返回全部。按创建时间倒序。
+     * 一作须同时拥有所有指定标签；均无条件则返回全部。
+     * sort 取值：views 按浏览数倒序；created（默认）按创建时间倒序（最新在上）；
+     * release_date / rating 尚未实现（无字段），接口预留，回退默认排序。
      */
-    public List<Galgame> findAll(String q, List<String> tags) {
+    public List<Galgame> findAll(String q, List<String> tags, String sort) {
         StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM galgames g WHERE 1=1");
         List<Object> args = new ArrayList<>();
         if (q != null && !q.isBlank()) {
@@ -117,14 +125,55 @@ public class GalgameDao {
                 }
             }
         }
-        sql.append(" ORDER BY g.created_at DESC, g.id DESC");
+        sql.append(orderBy(sort));
         return jdbcTemplate.query(sql.toString(), GALGAME_ROW_MAPPER, args.toArray());
+    }
+
+    /** 按排序值生成 ORDER BY 子句（含前置空格）；未知值回退创建时间倒序 */
+    private static String orderBy(String sort) {
+        if ("views".equals(sort)) {
+            return " ORDER BY g.view_count DESC, g.created_at DESC, g.id DESC";
+        }
+        return " ORDER BY g.created_at DESC, g.id DESC";
     }
 
     public boolean existsById(long id) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM galgames WHERE id = ?", Integer.class, id);
         return count != null && count > 0;
+    }
+
+    /** 浏览数 +1（详情页访问时调用） */
+    public void incrementView(long id) {
+        jdbcTemplate.update("UPDATE galgames SET view_count = view_count + 1 WHERE id = ?", id);
+    }
+
+    /** 是否已评分：防重表 galgame_ratings 存在 (galgame_id, user_id) 记录即已评过 */
+    public boolean hasRated(long galgameId, long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM galgame_ratings WHERE galgame_id = ? AND user_id = ?",
+                Integer.class, galgameId, userId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 新增评分（一人一票，0~10 分）：先向防重表 galgame_ratings 插记录，主键冲突（已评过）捕获
+     * DuplicateKeyException 返回 1；成功插入后增量更新 galgames 的 rating_avg / rating_count
+     * （新均值 = (旧均值×人数 + 新分) / (人数+1)，首次评分 avg 为 NULL 直接取新分），返回 0。
+     */
+    @Transactional
+    public int rate(long galgameId, long userId, double score) {
+        try {
+            jdbcTemplate.update("INSERT INTO galgame_ratings (galgame_id, user_id) VALUES (?, ?)",
+                    galgameId, userId);
+        } catch (DuplicateKeyException e) {
+            return 1;
+        }
+        jdbcTemplate.update(
+                "UPDATE galgames SET rating_avg = COALESCE((rating_avg * rating_count + ?) / (rating_count + 1), ?), "
+                        + "rating_count = rating_count + 1 WHERE id = ?",
+                score, score, galgameId);
+        return 0;
     }
 
     /** 删除 galgame；galgame_tags 由外键 ON DELETE CASCADE 一并清除 */
@@ -163,7 +212,11 @@ public class GalgameDao {
                 parseTags(rs.getString("tags")),
                 nullableLong(rs, "created_by"),
                 rs.getTimestamp("created_at").toLocalDateTime(),
-                rs.getTimestamp("updated_at").toLocalDateTime());
+                rs.getTimestamp("updated_at").toLocalDateTime(),
+                rs.getLong("view_count"),
+                rs.getDate("release_date") == null ? null : rs.getDate("release_date").toLocalDate(),
+                nullableDouble(rs, "rating_avg"),
+                rs.getLong("rating_count"));
     }
 
     /** 反序列化 links JSON 文本为 List<Link>；null / 空 / 解析失败一律回退空列表 */
@@ -193,6 +246,11 @@ public class GalgameDao {
 
     private static Long nullableLong(ResultSet rs, String column) throws SQLException {
         long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static Double nullableDouble(ResultSet rs, String column) throws SQLException {
+        double value = rs.getDouble(column);
         return rs.wasNull() ? null : value;
     }
 }

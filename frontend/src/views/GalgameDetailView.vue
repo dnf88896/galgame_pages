@@ -62,8 +62,28 @@
                 <span v-else class="gal-no-link">暂无资源链接</span>
               </div>
               <div class="gal-detail-meta">
+                <span v-if="detail.release_date">发售：{{ detail.release_date }}</span>
+                <span>评分：{{ detail.rating_avg != null ? `${Number(detail.rating_avg).toFixed(1)} / 10` : '暂无' }}<template v-if="detail.rating_count > 0">（{{ detail.rating_count }} 人评分）</template></span>
                 <span v-if="detail.created_at">创建：{{ formatTime(detail.created_at) }}</span>
                 <span v-if="detail.updated_at">更新：{{ formatTime(detail.updated_at) }}</span>
+              </div>
+              <div class="gal-rate-row">
+                <el-rate
+                  v-model="myScore"
+                  :max="10"
+                  allow-half
+                  show-score
+                  score-template="{value} 分"
+                  :disabled="!!detail.rated"
+                />
+                <el-button
+                  v-if="!detail.rated"
+                  type="primary"
+                  plain
+                  size="small"
+                  @click="submitRating"
+                >提交评分</el-button>
+                <span v-else class="gal-rated-hint">你已评过分</span>
               </div>
             </div>
           </div>
@@ -131,6 +151,16 @@
               />
             </el-form-item>
 
+            <el-form-item label="发售日期">
+              <el-date-picker
+                v-model="form.releaseDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="选择发售日期"
+                class="add-date-picker"
+              />
+            </el-form-item>
+
             <el-form-item label="资源链接">
               <div class="add-links">
                 <div v-for="(link, i) in links" :key="i" class="add-link-row">
@@ -188,6 +218,7 @@ const loading = ref(false)
 const notFound = ref(false)
 const loadError = ref('')
 const editMode = ref(false)
+const myScore = ref(0)
 
 // 编辑表单（与 AddGalgameView 完全一致）
 const form = reactive({
@@ -196,6 +227,7 @@ const form = reactive({
   image: '',
   description: '',
   staff: '',
+  releaseDate: '',
 })
 const links = ref([{ label: '', url: '' }])
 const imagePreview = ref('')
@@ -239,6 +271,35 @@ async function loadDetail() {
   }
 }
 
+// 用户评分：未登录先提示；重复评分刷新 rated 状态
+async function submitRating() {
+  if (!user.value?.id) {
+    ElMessage.warning('请先登录后再评分。')
+    return
+  }
+  if (detail.value?.rated) {
+    ElMessage.info('你已经评分过了。')
+    return
+  }
+  const score = Number(myScore.value)
+  if (!score || score <= 0) {
+    ElMessage.warning('请选择评分。')
+    return
+  }
+  try {
+    await api.post(`/galgames/${galgameId}/rating`, { score })
+    ElMessage.success('评分成功')
+    myScore.value = 0
+    await loadDetail()
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '评分失败'))
+    if (e?.response?.status === 409) {
+      myScore.value = 0
+      await loadDetail()
+    }
+  }
+}
+
 // 返回按钮：后退栈空（如直接输 URL 进入）时回列表页
 function goBack() {
   if (window.history.length > 1) router.back()
@@ -253,6 +314,7 @@ function enterEdit() {
   form.staff = d.staff || ''
   form.image = d.image || ''
   form.tags = Array.isArray(d.tags) ? [...d.tags] : []
+  form.releaseDate = d.release_date || ''
   links.value = Array.isArray(d.links) && d.links.length
     ? d.links.map((l) => ({ label: l.label || '', url: l.url || '' }))
     : [{ label: '', url: '' }]
@@ -309,6 +371,7 @@ async function submit() {
     description: form.description.trim(),
     image: form.image,
     staff: form.staff.trim(),
+    release_date: form.releaseDate || null,
     links: links.value
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
       .filter((l) => l.url),
@@ -446,6 +509,19 @@ onMounted(async () => {
   color: #909399;
   font-size: 13px;
 }
+.gal-rate-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  color: #909399;
+  font-size: 13px;
+}
+.gal-rated-hint {
+  color: #909399;
+  font-size: 13px;
+}
 .gal-tags {
   display: flex;
   flex-wrap: wrap;
@@ -517,6 +593,9 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 .add-tags-select {
+  width: 100%;
+}
+.add-date-picker {
   width: 100%;
 }
 .add-cover {

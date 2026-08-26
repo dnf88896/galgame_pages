@@ -11,6 +11,19 @@
       </header>
 
       <div class="gal-filters">
+        <!-- 排序行：总浏览数 / 创建顺序 / 发售日期 / 评分；后两项暂未实现，点击提示未上线 -->
+        <div class="gal-filter-row">
+          <span class="gal-filter-name">排序</span>
+          <div class="gal-filter-btns">
+            <button
+              v-for="opt in sortOptions"
+              :key="opt.value"
+              class="gal-filter-btn"
+              :class="{ active: sortBy === opt.value }"
+              @click="setSort(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
+        </div>
         <div v-for="row in rows" :key="row.key" class="gal-filter-row">
           <span class="gal-filter-name">{{ row.name }}</span>
           <div class="gal-filter-btns">
@@ -81,6 +94,11 @@
                 </template>
                 <span v-else class="gal-no-link">暂无资源链接</span>
               </div>
+              <div class="gal-views">
+                <span>浏览 {{ p.view_count || 0 }}</span>
+                <span v-if="p.rating_avg != null">评分 {{ Number(p.rating_avg).toFixed(1) }} / 10</span>
+                <span v-else>暂无评分</span>
+              </div>
             </div>
           </article>
         </div>
@@ -96,6 +114,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import api from '../api'
 import { fetchTagStructure, sectionLabel, getErrorMessage, resolveAssetUrl } from '../utils/format'
 import { user } from '../store/user'
@@ -129,6 +148,25 @@ const rows = computed(() => {
 const filters = reactive({ type: '', lang: '', plat: '', work: '' })
 const tagCategories = ref([])
 
+// 排序：created 默认（管理员添加顺序，最新在上）/ views 总浏览数 / release_date、rating 暂未实现
+const sortOptions = [
+  { value: 'views', label: '总浏览数' },
+  { value: 'created', label: '创建顺序' },
+  { value: 'release_date', label: '发售日期' },
+  { value: 'rating', label: '评分' },
+]
+const sortBy = ref('created')
+const SORT_LABEL = { release_date: '发售日期', rating: '评分' }
+
+function setSort(val) {
+  if (val === 'release_date' || val === 'rating') {
+    ElMessage.info(`「${SORT_LABEL[val]}」排序暂未上线，敬请期待。`)
+    return
+  }
+  sortBy.value = val
+  load()
+}
+
 const hasFilter = computed(() => Object.values(filters).some((v) => v !== ''))
 
 // 所有非空筛选值 → 后端按 tags=a&tags=b 多标签 AND 过滤
@@ -159,7 +197,7 @@ async function load() {
   loadError.value = ''
   try {
     const { data } = await api.get('/galgames', {
-      params: { tags: selectedSections.value },
+      params: { tags: selectedSections.value, sort: sortBy.value },
       paramsSerializer: galParamsSerializer,
     })
     galgames.value = Array.isArray(data) ? data : []
@@ -457,6 +495,13 @@ onMounted(() => {
 .gal-no-link {
   color: #b0b3b8;
   font-size: 12px;
+}
+.gal-views {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909399;
 }
 .gal-error {
   margin-bottom: 16px;

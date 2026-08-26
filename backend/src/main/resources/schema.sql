@@ -186,6 +186,10 @@ CREATE TABLE IF NOT EXISTS galgames (
     description TEXT         NULL COMMENT '简介',
     image       VARCHAR(500) NULL COMMENT '封面图 URL（本地上传 /uploads/galgame_images/ 或外部链接）',
     staff       VARCHAR(500) NULL COMMENT '制作人员 / 会社',
+    view_count  INT          NOT NULL DEFAULT 0 COMMENT '总浏览数（详情页访问 +1）',
+    release_date DATE        NULL COMMENT '发售日期',
+    rating_avg   DECIMAL(4,2) NULL COMMENT '评分平均分（用户评分汇总，管理员不可写）',
+    rating_count INT          NOT NULL DEFAULT 0 COMMENT '评分人数（一人一票）',
     links       TEXT         NULL COMMENT '资源链接 JSON 数组文本（[{label,url}]）',
     created_by  BIGINT       NULL,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -202,6 +206,18 @@ CREATE TABLE IF NOT EXISTS galgame_tags (
     PRIMARY KEY (galgame_id, section_key),
     KEY idx_galgame_tags_section (section_key),
     CONSTRAINT fk_galgame_tags_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 评分防重：只记录「谁评过」（不含分数），防止同一用户重复评分刷分。
+-- 平均分 / 人数增量维护在 galgames.rating_avg / rating_count（新评分 = (旧平均×人数 + 新分) / (人数+1)）。
+CREATE TABLE IF NOT EXISTS galgame_ratings (
+    galgame_id  BIGINT      NOT NULL,
+    user_id     BIGINT      NOT NULL,
+    created_at  DATETIME    DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, user_id),
+    KEY idx_galgame_ratings_user (user_id),
+    CONSTRAINT fk_galgame_ratings_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_galgame_ratings_user    FOREIGN KEY (user_id)    REFERENCES users (id)    ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 收藏夹：用户收藏帖子（user_id 收藏 post_id），公开可见，可选隐藏（users.hide_favorites）。

@@ -21,6 +21,24 @@
       <div class="home-center">
         <header class="topbar">
           <div class="topbar-actions">
+        <el-dropdown trigger="click" @command="onSortCommand">
+          <el-button class="filter-btn">
+            排序
+            <span class="filter-arrow">▾</span>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="opt in sortOptions"
+                :key="opt.value"
+                :command="opt.value"
+                :disabled="opt.value === 'following' && !loggedIn"
+              >
+                {{ opt.label }}<span v-if="sortBy === opt.value" class="filter-check">✓</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-input
           v-model="searchKeyword"
           class="search-input"
@@ -226,8 +244,28 @@ const totalCount = computed(() =>
 )
 const emptyText = computed(() => {
   if (searchKeyword.value.trim()) return '没有找到匹配的帖子。'
+  if (sortBy.value === 'following') return '你关注的人还没有发帖。'
   return '还没有帖子，来发第一帖吧。'
 })
+
+// 排序：time 默认（时间倒序）/ hot 热度 / likes 点赞量 / following 只看关注的人
+const sortOptions = [
+  { value: 'time', label: '时间顺序' },
+  { value: 'hot', label: '热度' },
+  { value: 'likes', label: '点赞量' },
+  { value: 'following', label: '关注的人' },
+]
+const sortBy = ref('time')
+const loggedIn = computed(() => !!user.value)
+
+function onSortCommand(val) {
+  if (val === 'following' && !loggedIn.value) {
+    ElMessage.warning('请先登录，再按「关注的人」排序。')
+    return
+  }
+  sortBy.value = val
+  load()
+}
 
 const searchKeyword = ref('')
 let searchTimer = null
@@ -256,6 +294,7 @@ async function load() {
     const q = searchKeyword.value.trim()
     if (q) params.q = q
     if (activeCategory.value) params.category = activeCategory.value
+    if (sortBy.value) params.sort = sortBy.value
     const { data } = await api.get('/posts', { params })
     posts.value = data
   } catch (e) {
@@ -421,6 +460,20 @@ onMounted(() => {
 }
 .search-input {
   width: 260px;
+}
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+}
+.filter-arrow {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.filter-check {
+  margin-left: 8px;
+  color: #409eff;
+  font-weight: 600;
 }
 .stats {
   display: flex;

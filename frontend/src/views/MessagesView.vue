@@ -43,7 +43,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="通知" name="notifications">
+      <el-tab-pane name="notifications">
+        <template #label>
+          <el-badge :value="notifUnread" :hidden="!notifUnread" :max="99" class="notif-tab-badge">通知</el-badge>
+        </template>
         <el-card v-if="notifLoading && !notifications.length" style="margin-top: 16px">
           <el-skeleton :rows="6" animated />
         </el-card>
@@ -151,6 +154,18 @@ const notifications = ref([])
 const notifLoading = ref(false)
 const notifError = ref('')
 const notifLoaded = ref(false)
+// 通知 tab 自身的未读数（顶栏红点 = 私信未读 + 通知未读；这里只负责「通知」tab 的角标）
+const notifUnread = ref(0)
+
+// 拉取通知未读数（不产生已读副作用，进入消息页即调用，用于通知 tab 角标）
+async function loadNotifUnread() {
+  try {
+    const { data } = await api.get('/notifications/unread-count')
+    notifUnread.value = data && data.unread != null ? Number(data.unread) : 0
+  } catch {
+    notifUnread.value = 0
+  }
+}
 
 async function loadNotifications() {
   notifLoading.value = true
@@ -167,7 +182,7 @@ async function loadNotifications() {
   }
 }
 
-// 切到「通知」tab：拉取列表 → 全部标已读 → 触发顶栏红点刷新
+// 切到「通知」tab：拉取列表 → 全部标已读 → 通知 tab 角标清零 → 触发顶栏红点刷新
 async function onTabChange(name) {
   if (name !== 'notifications') return
   await loadNotifications()
@@ -177,6 +192,7 @@ async function onTabChange(name) {
     notifications.value.forEach((n) => {
       n.is_read = 1
     })
+    notifUnread.value = 0
   } catch {
     // 标已读失败不阻塞列表展示
   }
@@ -239,6 +255,7 @@ function goNotification(n) {
 onMounted(() => {
   if (!requireLogin(router)) return
   load()
+  loadNotifUnread()
 })
 </script>
 
@@ -305,6 +322,12 @@ onMounted(() => {
 /* ---- 通知 ---- */
 .notif-list {
   margin-top: 16px;
+}
+.notif-tab-badge :deep(.el-badge__content) {
+  position: static;
+  transform: none;
+  margin-left: 5px;
+  vertical-align: 2px;
 }
 .notif-item {
   display: flex;

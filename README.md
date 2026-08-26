@@ -75,7 +75,9 @@
 
 ## 启动步骤
 
-> **一键启动：** 双击项目根目录的 **`start-forum.bat`**，会自动拉起 MySQL/后端/前端并打开浏览器；要停止服务双击 **`stop-forum.bat`**。（脚本已做「已在运行则跳过」判断，重复双击不会起重复进程）
+> **一键启动：** 双击项目根目录的 **`start-forum.bat`**，会自动拉起 MySQL/后端/前端并打开浏览器；要停止服务双击 **`stop-forum.bat`**（前端+后端+MySQL 全停）。（脚本已做「已在运行则跳过」判断，重复双击不会起重复进程）
+>
+> **只想停前后端、保留 MySQL 常驻：** 双击 **`stop-app.bat`**，只停 5173/8080，不动 3306。
 >
 > 首次在**新机器**上运行：脚本自动探测 MySQL，找不到会问一次 `mysqld.exe` 所在目录（例如 `C:\mysql\bin`），输入后缓存到 `mysql-config.txt`，以后不再问。
 
@@ -99,6 +101,26 @@
    ```
 
 4. 浏览器打开 <http://localhost:5173>
+
+### 在 IDE 中点「运行」启动（不使用脚本）
+
+> **前提：MySQL 已启动。** 后端数据库账号/密码/端口在 `application.properties` 里**带默认值**（`galgame` / `galgame123` / `3306`），所以 IDE 里直接点运行即可连上数据库，无需任何额外配置。
+> MySQL 可以先双击 `start-forum.bat` 带起（脚本检测到 MySQL 已在跑会跳过、只起后端和前端），之后 MySQL 会一直常驻。
+
+**① 启动后端（Spring Boot，端口 8080）：**
+1. 用 IntelliJ IDEA 打开 `backend` 目录（IDEA 自动识别为 Maven + Spring Boot 项目）。
+2. 打开 `GalgameBackendApplication.java`，点击 `main` 方法左侧的绿色 ▶ 运行。
+3. 看到日志 `Started GalgameBackendApplication` 即后端就绪。
+
+**② 启动前端（Vite，端口 5173）：**
+1. 用 IntelliJ IDEA 打开 `frontend` 目录。
+2. 在 `package.json` 上右键 → `Show npm Scripts` → 双击 `dev`（或右键 Run `dev`）。
+3. Vite 开发服务器就绪后，浏览器打开 <http://localhost:5173>。
+
+**注意：**
+- 后端、前端是两个独立进程，各点一次 ▶（共两次）；后端冷启动要十几秒，页面等后端就绪后再访问。
+- 8080 / 5173 已被占用时重复点 ▶ 会启动失败，先停旧进程再点。
+- 本方式与 `start-forum.bat` / `stop-forum.bat` 一键启停**并存**，日常可随意选用其中一种。
 
 ## 拷到别的机器（给别人测试）
 

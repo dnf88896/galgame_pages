@@ -64,12 +64,22 @@ public class PostDao {
      * 每个标签通过 post_tags 关联表一条 EXISTS 判断，一帖须同时拥有所有指定标签（一帖可挂多个标签）。
      * hiddenAuthorIds 为对当前查看者不可见的作者集合（屏蔽是双向的），
      * 非空时追加 (user_id IS NULL OR user_id NOT IN (...)) 条件；user_id 为 NULL 的旧数据始终可见。
-     * 以后新增过滤维度（作者、时间范围、排序等）在此追加一段即可。
+     * sort 为 following 时只返回当前用户关注的人的帖子（currentUserId 为空则返回空列表）。
+     * 排序：time 按时间倒序；hot 按热度（view + reply*3 + like*5）倒序；likes 按点赞量倒序；其余默认时间倒序。
      */
-    public List<Post> findAll(PostFilter filter, Collection<Long> hiddenAuthorIds) {
+    public List<Post> findAll(PostFilter filter, Collection<Long> hiddenAuthorIds, Long currentUserId) {
+        String sort = filter == null ? null : filter.sort();
+        boolean followingOnly = "following".equals(sort);
+        if (followingOnly && currentUserId == null) {
+            return List.of();
+        }
         StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM posts");
         List<String> where = new ArrayList<>();
         List<Object> args = new ArrayList<>();
+        if (followingOnly) {
+            where.add("user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)");
+            args.add(currentUserId);
+        }
         if (filter != null) {
             if (filter.category() != null) {
                 where.add("category = ?");
@@ -106,10 +116,21 @@ public class PostDao {
         if (!where.isEmpty()) {
             sql.append(" WHERE ").append(String.join(" AND ", where));
         }
-        sql.append(" ORDER BY created_at DESC, id DESC");
+        sql.append(orderBy(sort));
         List<Post> posts = new ArrayList<>(jdbcTemplate.query(sql.toString(), POST_ROW_MAPPER, args.toArray()));
         attachTags(posts);
         return posts;
+    }
+
+    /** 按排序值生成 ORDER BY 子句（含前置空格）；未知值回退时间倒序 */
+    private static String orderBy(String sort) {
+        if ("likes".equals(sort)) {
+            return " ORDER BY like_count DESC, created_at DESC, id DESC";
+        }
+        if ("hot".equals(sort)) {
+            return " ORDER BY (view_count + reply_count * 3 + like_count * 5) DESC, created_at DESC, id DESC";
+        }
+        return " ORDER BY created_at DESC, id DESC";
     }
 
     /** 各分区帖子数，返回 [{name, count}]，供首页左侧分区栏展示 */
