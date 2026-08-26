@@ -49,11 +49,20 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/auth/me",
                         "/api/auth/profile",
                         "/api/auth/avatar",
+                        "/api/auth/admin-verify",
+                        "/api/auth/password",
                         "/api/posts",
                         "/api/posts/*/replies",
                         "/api/posts/*/like",
+                        "/api/posts/*/favorite",
                         "/api/replies/*/like",
                         "/api/replies/*",
-                        "/api/notifications/**");
+                        "/api/notifications/**",
+                        "/api/announcements",
+                        "/api/posts/*/category",
+                        "/api/posts/*/report",
+                        "/api/replies/*/report",
+                        "/api/reports/**",
+                        "/api/users/*/unban");
     }
 }

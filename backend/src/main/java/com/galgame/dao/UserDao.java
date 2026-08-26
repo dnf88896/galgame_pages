@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +31,10 @@ public class UserDao {
                     rs.getString("username"),
                     rs.getString("avatar_url"),
                     rs.getString("bio"),
-                    rs.getTimestamp("created_at").toLocalDateTime());
+                    rs.getTimestamp("created_at").toLocalDateTime(),
+                    rs.getInt("admin_level"),
+                    rs.getInt("hide_favorites"),
+                    nullableTimestamp(rs, "ban_until"));
 
     public UserDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -38,14 +42,14 @@ public class UserDao {
 
     public Optional<User> findById(Long id) {
         List<User> rows = jdbcTemplate.query(
-                "SELECT id, username, avatar_url, bio, created_at FROM users WHERE id = ?",
+                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE id = ?",
                 USER_ROW_MAPPER, id);
         return rows.stream().findFirst();
     }
 
     public Optional<User> findByUsername(String username) {
         List<User> rows = jdbcTemplate.query(
-                "SELECT id, username, avatar_url, bio, created_at FROM users WHERE username = ?",
+                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE username = ?",
                 USER_ROW_MAPPER, username);
         return rows.stream().findFirst();
     }
@@ -56,7 +60,7 @@ public class UserDao {
             return List.of();
         }
         StringBuilder sql = new StringBuilder(
-                "SELECT id, username, avatar_url, bio, created_at FROM users WHERE id IN (");
+                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE id IN (");
         for (int i = 0; i < ids.size(); i++) {
             if (i > 0) {
                 sql.append(", ");
@@ -65,6 +69,11 @@ public class UserDao {
         }
         sql.append(")");
         return jdbcTemplate.query(sql.toString(), USER_ROW_MAPPER, ids.toArray());
+    }
+
+    /** 全部用户 id（公告广播给所有用户用） */
+    public List<Long> findAllUserIds() {
+        return jdbcTemplate.query("SELECT id FROM users", (rs, rowNum) -> rs.getLong("id"));
     }
 
     public boolean existsByUsername(String username) {
@@ -79,6 +88,19 @@ public class UserDao {
                 "SELECT password_hash FROM users WHERE username = ?",
                 (rs, rowNum) -> rs.getString("password_hash"), username);
         return rows.stream().findFirst();
+    }
+
+    /** 取某用户 id 的密码哈希（修改密码校验用），用户不存在返回 empty */
+    public Optional<String> findPasswordHashById(Long id) {
+        List<String> rows = jdbcTemplate.query(
+                "SELECT password_hash FROM users WHERE id = ?",
+                (rs, rowNum) -> rs.getString("password_hash"), id);
+        return rows.stream().findFirst();
+    }
+
+    /** 更新密码哈希 */
+    public void updatePassword(Long id, String passwordHash) {
+        jdbcTemplate.update("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id);
     }
 
     /** 新增用户，返回数据库生成的自增 id */
@@ -98,7 +120,35 @@ public class UserDao {
         jdbcTemplate.update("UPDATE users SET bio = ? WHERE id = ?", bio, id);
     }
 
+    /** 设置是否隐藏收藏列表：1 隐藏（他人不可见），0 公开（默认）。 */
+    public void updateHideFavorites(Long id, int hideFavorites) {
+        jdbcTemplate.update("UPDATE users SET hide_favorites = ? WHERE id = ?", hideFavorites, id);
+    }
+
     public void updateAvatarUrl(Long id, String avatarUrl) {
         jdbcTemplate.update("UPDATE users SET avatar_url = ? WHERE id = ?", avatarUrl, id);
+    }
+
+    /** 提升管理员权限等级（只升不降：是否提升由调用方判断）。 */
+    public void grantAdminLevel(Long id, int level) {
+        jdbcTemplate.update("UPDATE users SET admin_level = ? WHERE id = ?", level, id);
+    }
+
+    /** 设置封禁截止时间（null=解封；否则为封禁到期时间，过期自动视为未封禁） */
+    public void updateBanUntil(Long id, LocalDateTime until) {
+        jdbcTemplate.update("UPDATE users SET ban_until = ? WHERE id = ?", until, id);
+    }
+
+    /** 按用户名模糊搜索（最多 50 条，新注册优先）；用户名只允许中英文/数字/下划线，无需 LIKE 转义 */
+    public List<User> findByNameLike(String keyword) {
+        return jdbcTemplate.query(
+                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at "
+                        + "FROM users WHERE username LIKE ? ORDER BY id DESC LIMIT 50",
+                USER_ROW_MAPPER, "%" + keyword + "%");
+    }
+
+    private static LocalDateTime nullableTimestamp(ResultSet rs, String column) throws SQLException {
+        java.sql.Timestamp ts = rs.getTimestamp(column);
+        return ts == null ? null : ts.toLocalDateTime();
     }
 }

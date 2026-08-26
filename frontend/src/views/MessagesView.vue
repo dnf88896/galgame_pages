@@ -78,6 +78,13 @@
                 <span class="notif-time">{{ formatTime(n.created_at) }}</span>
               </div>
               <div v-if="notifPreview(n)" class="notif-preview">{{ notifPreview(n) }}</div>
+              <div v-if="notifMedia(n).length" class="notif-media" @click.stop>
+                <template v-for="m in notifMedia(n)" :key="m.url">
+                  <img v-if="m.kind === 'image'" :src="resolveAssetUrl(m.url)" class="notif-media-img" alt="" />
+                  <audio v-else-if="m.kind === 'audio'" :src="resolveAssetUrl(m.url)" controls class="notif-media-audio" />
+                  <video v-else-if="m.kind === 'video'" :src="resolveAssetUrl(m.url)" controls class="notif-media-video" />
+                </template>
+              </div>
             </div>
             <span v-if="Number(n.is_read) === 0" class="notif-dot" />
           </div>
@@ -176,9 +183,10 @@ async function onTabChange(name) {
   bumpUnreadRefresh()
 }
 
-// 通知标题按 type 通用化（mention / announcement / 其他兜底），勿写死只认 mention
+// 通知标题按 type 通用化（mention / announcement / report / warning / 其他兜底），勿写死只认 mention
 function notifTitle(n) {
   if (n.type === 'announcement') return n.title || '公告'
+  if (n.type === 'report' || n.type === 'warning') return n.title || (n.type === 'report' ? '举报受理结果' : '内容被删除')
   const name = n.actor?.username || '有人'
   if (n.type === 'mention') return `${name} 提到你`
   return `${name} 有新消息`
@@ -188,6 +196,28 @@ function notifTitle(n) {
 function notifPreview(n) {
   const c = n.content || ''
   return c.length > 80 ? `${c.slice(0, 80)}…` : c
+}
+
+// 通知媒体附件解析：n.media 为 JSON 数组字符串（[{url, mime}]），按 mime 前缀归类 kind，只保留有 url 的项
+function notifMedia(n) {
+  if (!n.media) return []
+  let list
+  try {
+    list = JSON.parse(n.media)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(list)) return []
+  return list
+    .map((m) => {
+      const mime = m?.mime || ''
+      let kind = ''
+      if (mime.startsWith('image/')) kind = 'image'
+      else if (mime.startsWith('audio/')) kind = 'audio'
+      else if (mime.startsWith('video/')) kind = 'video'
+      return { url: m?.url || '', kind }
+    })
+    .filter((m) => m.url && m.kind)
 }
 
 function notifAvatarSrc(n) {
@@ -330,5 +360,33 @@ onMounted(() => {
   border-radius: 50%;
   background: #f56c6c;
   flex-shrink: 0;
+}
+.notif-media {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* 关键：阻止 img/video 被 flex stretch 拉伸变形 */
+  gap: 8px;
+  margin-top: 8px;
+}
+.notif-media-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: contain; /* 兜底：即使宽高被强制，内容也等比不拉伸 */
+  border-radius: 6px;
+}
+.notif-media-audio {
+  width: 100%;
+}
+.notif-media-video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 6px;
 }
 </style>

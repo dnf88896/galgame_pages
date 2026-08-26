@@ -4,6 +4,17 @@
       <div class="nav-inner">
         <router-link to="/" class="nav-brand">KUN Gal Forum</router-link>
         <nav class="nav-right">
+          <router-link
+            v-if="user && Number(user.admin_level) > 0"
+            to="/admin/reports"
+            class="nav-report-btn"
+          >举报受理</router-link>
+          <button class="nav-gear" type="button" title="设置" @click="settingsOpen = true">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="18" height="18">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.108 1.205.164.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.108 1.205l.527.737c.32.448.27 1.06-.12 1.45l-.774.774a1.125 1.125 0 0 1-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527a1.125 1.125 0 0 1-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.205-.164-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.205l-.526-.737a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.781-.929l.149-.894Z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+            </svg>
+          </button>
           <template v-if="!loggedIn">
             <router-link to="/login" class="nav-link">登录 / 注册</router-link>
           </template>
@@ -24,6 +35,16 @@
     <main class="app-main">
       <router-view />
     </main>
+    <SettingsPanel v-model="settingsOpen" />
+
+    <!-- 封禁锁屏：固定全屏覆盖，唯一操作是退出登录 -->
+    <div v-if="banned" class="ban-overlay">
+      <div class="ban-box">
+        <h1 class="ban-title">您已被封禁</h1>
+        <p class="ban-sub">{{ banUntilText }}</p>
+        <el-button type="danger" plain size="small" @click="logout">退出登录</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -32,15 +53,35 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from './api'
-import { token, user, clearToken } from './store/user'
+import { token, user, setUser, clearToken } from './store/user'
 import { unreadRefreshKey } from './store/unread'
 import { resolveAssetUrl } from './utils/format'
+import SettingsPanel from './components/SettingsPanel.vue'
 
 const router = useRouter()
+
+// 设置面板开关（登录与否都可打开）
+const settingsOpen = ref(false)
 
 const loggedIn = computed(() => !!token.value && !!user.value)
 const avatarSrc = computed(() => resolveAssetUrl(user.value?.avatar_url))
 const firstChar = computed(() => (user.value?.username || '?').slice(0, 1).toUpperCase())
+
+// 封禁判断：ban_until 存在且未过期
+const banned = computed(() => {
+  const until = user.value?.ban_until
+  if (!until) return false
+  const t = new Date(until).getTime()
+  return !isNaN(t) && t > Date.now()
+})
+const banPermanent = computed(() => !!user.value?.ban_until && user.value.ban_until.startsWith('2099'))
+const banUntilText = computed(() => {
+  if (banPermanent.value) return '永久封禁'
+  const until = user.value?.ban_until
+  if (!until) return ''
+  const d = new Date(until)
+  return isNaN(d.getTime()) ? '封禁中' : `封禁至 ${d.toLocaleString()}`
+})
 
 const loggingOut = ref(false)
 
@@ -63,6 +104,17 @@ async function loadUnread() {
   unreadTotal.value = dmUnread + notifUnread
 }
 
+// 登录时刷新当前用户信息（让中途被封禁的用户刷新页面后立即锁屏）
+async function refreshUser() {
+  if (!loggedIn.value) return
+  try {
+    const { data } = await api.get('/auth/me')
+    if (data && data.id) setUser(data)
+  } catch {
+    // 401 由 api 拦截器统一处理；其他错误静默
+  }
+}
+
 async function logout() {
   loggingOut.value = true
   try {
@@ -77,7 +129,10 @@ async function logout() {
   loggingOut.value = false
 }
 
-onMounted(() => loadUnread())
+onMounted(() => {
+  refreshUser()
+  loadUnread()
+})
 
 // 回到会话列表/聊天页后未读会变化，命中 /messages 路径时刷新
 watch(
@@ -138,6 +193,36 @@ watch(unreadRefreshKey, () => loadUnread())
 .nav-link:hover {
   text-decoration: underline;
 }
+.nav-report-btn {
+  color: #fff;
+  background: #f56c6c;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+.nav-report-btn:hover {
+  background: #f78989;
+}
+.nav-gear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #606266;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.nav-gear:hover {
+  color: #409eff;
+  background: rgba(64, 158, 255, 0.1);
+}
 .nav-user {
   display: flex;
   align-items: center;
@@ -156,5 +241,29 @@ watch(unreadRefreshKey, () => loadUnread())
 }
 .app-main {
   min-height: calc(100vh - 52px);
+}
+.ban-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ban-box {
+  text-align: center;
+}
+.ban-title {
+  font-size: 34px;
+  font-weight: 700;
+  color: #f56c6c;
+  margin: 0 0 12px;
+  letter-spacing: 6px;
+}
+.ban-sub {
+  font-size: 14px;
+  color: #909399;
+  margin: 0 0 20px;
 }
 </style>

@@ -37,6 +37,34 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "CONSTRAINT fk_reply_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+    private static final String POST_FAVORITES_DDL =
+            "CREATE TABLE post_favorites ("
+                    + "post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (post_id, user_id), "
+                    + "KEY idx_post_favorites_user (user_id), "
+                    + "CONSTRAINT fk_post_favorites_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_post_favorites_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String REPORTS_DDL =
+            "CREATE TABLE reports ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "reporter_id BIGINT NOT NULL, "
+                    + "target_type VARCHAR(10) NOT NULL DEFAULT 'post', "
+                    + "target_id BIGINT NOT NULL, "
+                    + "reason VARCHAR(200) NULL, "
+                    + "status TINYINT NOT NULL DEFAULT 0, "
+                    + "handled_at DATETIME NULL, "
+                    + "result VARCHAR(50) NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "UNIQUE KEY uk_reports_reporter_target (reporter_id, target_type, target_id), "
+                    + "KEY idx_reports_target (target_type, target_id), "
+                    + "KEY idx_reports_status (status, id), "
+                    + "CONSTRAINT fk_reports_user FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
     private final JdbcTemplate jdbcTemplate;
 
     public DatabaseMigrator(JdbcTemplate jdbcTemplate) {
@@ -48,6 +76,8 @@ public class DatabaseMigrator implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         ensureColumn("posts", "user_id", "BIGINT NULL");
         ensureColumn("replies", "user_id", "BIGINT NULL");
+        // 管理员权限等级：旧库 users 表补 admin_level 列（默认 0 = 普通用户）
+        ensureColumn("users", "admin_level", "INT NOT NULL DEFAULT 0");
         ensurePostTagsTable();
         migratePostSectionsToTags();
         dropColumnIfExists("posts", "section");
@@ -63,6 +93,18 @@ public class DatabaseMigrator implements ApplicationRunner {
 
         ensureLikeTable("post_likes", POST_LIKES_DDL);
         ensureLikeTable("reply_likes", REPLY_LIKES_DDL);
+        // 收藏夹：旧库 users 表补 hide_favorites 列（默认 0 = 公开），并确保 post_favorites 表存在
+        ensureColumn("users", "hide_favorites", "TINYINT NOT NULL DEFAULT 0");
+        ensureLikeTable("post_favorites", POST_FAVORITES_DDL);
+        // 封禁：users 表补 ban_until 列（NULL=未封禁，2099-12-31=永久封禁；过期自动视为解封）
+        ensureColumn("users", "ban_until", "DATETIME NULL");
+        // 公告媒体：通知表补 media 列（JSON 附件列表，公告广播用）
+        ensureColumn("notifications", "media", "TEXT NULL");
+        // 举报：确保 reports 表存在（schema.sql 已建，这里兜底旧库），并补处理状态列
+        ensureLikeTable("reports", REPORTS_DDL);
+        ensureColumn("reports", "status", "TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("reports", "handled_at", "DATETIME NULL");
+        ensureColumn("reports", "result", "VARCHAR(50) NULL");
 
         recomputeLikeCounts();
     }

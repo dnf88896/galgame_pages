@@ -10,7 +10,7 @@
               v-for="child in group.children"
               :key="child.label"
               class="left-nav-sub-btn"
-              @click="child.all ? goAllTopics() : child.to && router.push(child.to)"
+              @click="onLeftNavChildClick(child)"
             >
               {{ child.label }}
             </button>
@@ -117,12 +117,46 @@
       </div>
     </div>
   </div>
+
+    <!-- 发布公告：仅 1 级管理员可用，普通用户点击提示去认证 -->
+    <el-dialog v-model="annDialogVisible" title="发布公告" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="公告标题">
+          <el-input v-model="annForm.title" maxlength="100" placeholder="公告标题" />
+        </el-form-item>
+        <el-form-item label="公告正文">
+          <el-input
+            v-model="annForm.content"
+            type="textarea"
+            :rows="6"
+            maxlength="500"
+            show-word-limit
+            placeholder="公告内容，将通知到所有用户"
+          />
+        </el-form-item>
+        <el-form-item label="媒体附件（图片/音频/视频，可选）">
+          <input type="file" multiple accept="image/*,audio/*,video/*" @change="onAnnFileChange" />
+          <div v-if="annFiles.length" class="ann-files-picked">
+            <div v-for="(f, i) in annFiles" :key="i" class="ann-file-item">
+              <span class="ann-file-name" :title="f.name">{{ f.name }}</span>
+              <el-button link type="danger" @click="removeAnnFile(i)">×</el-button>
+            </div>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="annDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="annSubmitting" @click="submitAnnouncement">发布</el-button>
+      </template>
+    </el-dialog>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import api from '../api'
+import { user } from '../store/user'
 import AttachmentList from '../components/AttachmentList.vue'
 import { categories, categoryDescriptions, fetchTagStructure, sectionLabel, formatTime, isToday, getErrorMessage } from '../utils/format'
 
@@ -139,7 +173,7 @@ const leftNavGroups = [
     label: '发布',
     children: [
       { label: '发布帖子', to: '/compose' },
-      { label: '左侧边栏按钮1-2' },
+      { label: '发布公告', action: 'announcement' },
       { label: '左侧边栏按钮1-3' },
       { label: '左侧边栏按钮1-4' },
     ],
@@ -150,14 +184,14 @@ const leftNavGroups = [
     { label: '技术交流', to: '/tag/technique' },
     { label: '其它话题', to: '/tag/others' },
   ] },
-  { label: '左侧边栏按钮3', children: [
-    { label: '左侧边栏按钮3-1' },
+  { label: 'galgame', children: [
+    { label: 'galgame', to: '/galgame' },
     { label: '左侧边栏按钮3-2' },
     { label: '左侧边栏按钮3-3' },
     { label: '左侧边栏按钮3-4' },
   ] },
-  { label: '左侧边栏按钮4', children: [
-    { label: '左侧边栏按钮4-1' },
+  { label: '社交', children: [
+    { label: '搜索用户', to: '/search-user' },
     { label: '左侧边栏按钮4-2' },
     { label: '左侧边栏按钮4-3' },
     { label: '左侧边栏按钮4-4' },
@@ -274,6 +308,82 @@ function goPost(id) {
 // 顶部「发布话题」入口：跳转到独立发帖页
 function goCompose() {
   router.push('/compose')
+}
+
+// 左侧边栏子按钮统一点击：all=回到全部话题；to=跳转路由；action=自定义动作（发布公告）
+function onLeftNavChildClick(child) {
+  if (child.all) {
+    goAllTopics()
+    return
+  }
+  if (child.to) {
+    router.push(child.to)
+    return
+  }
+  if (child.action === 'announcement') {
+    openAnnouncementDialog()
+  }
+}
+
+// 发布公告弹窗：仅 1 级管理员可发，普通用户提示去认证
+const annDialogVisible = ref(false)
+const annSubmitting = ref(false)
+const annForm = reactive({ title: '', content: '' })
+// 公告媒体附件：本地 File 列表（可多选，图片/音频/视频）
+const annFiles = ref([])
+
+// 收集选中的附件文件；清空 input 的 value 允许重复选同一文件
+function onAnnFileChange(e) {
+  const list = e.target.files
+  if (list) {
+    annFiles.value.push(...Array.from(list))
+  }
+  e.target.value = ''
+}
+
+// 移除单个已选附件
+function removeAnnFile(index) {
+  annFiles.value.splice(index, 1)
+}
+
+function openAnnouncementDialog() {
+  const isAdmin = user.value && Number(user.value.admin_level) > 0
+  if (!isAdmin) {
+    ElMessage.warning('请通过1级管理员认证。')
+    return
+  }
+  annDialogVisible.value = true
+}
+
+async function submitAnnouncement() {
+  const title = annForm.title.trim()
+  const content = annForm.content.trim()
+  if (!title) {
+    ElMessage.warning('请填写公告标题。')
+    return
+  }
+  if (!content) {
+    ElMessage.warning('请填写公告正文。')
+    return
+  }
+  annSubmitting.value = true
+  try {
+    // 附件随公告一起以 multipart/form-data 上传
+    const fd = new FormData()
+    fd.append('title', title)
+    fd.append('content', content)
+    for (const f of annFiles.value) fd.append('attachments', f, f.name)
+    const { data } = await api.post('/announcements', fd)
+    ElMessage.success(`公告已发布，已通知 ${data.count} 位用户`)
+    annDialogVisible.value = false
+    annForm.title = ''
+    annForm.content = ''
+    annFiles.value = []
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '发布公告失败'))
+  } finally {
+    annSubmitting.value = false
+  }
 }
 
 onMounted(() => {
@@ -428,10 +538,14 @@ onMounted(() => {
 }
 .left-nav {
   position: sticky;
-  top: 24px;
+  /* 滚动时贴住顶部导航栏（高约 52px+1px 边框）下方，不与其重叠 */
+  top: 56px;
+  /* 与右侧内容区顶对齐（home-center 顶部 padding 24px），不与顶部导航栏接触 */
+  margin-top: 24px;
   /* 浮出子面板要盖住右侧分区栏：给整列 z-index 提升层叠上下文（否则分区栏 sticky 会压在子面板上面） */
   z-index: 30;
   border-right: 1px solid #e4e7ed;
+  border-radius: 8px;
   padding: 6px 0;
   display: flex;
   flex-direction: column;
@@ -611,5 +725,30 @@ onMounted(() => {
   .board-desc {
     display: none;
   }
+}
+
+/* 发布公告弹窗的媒体附件已选列表（行内 flex、浅灰底、小圆角） */
+.ann-files-picked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+}
+.ann-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+.ann-file-name {
+  font-size: 13px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

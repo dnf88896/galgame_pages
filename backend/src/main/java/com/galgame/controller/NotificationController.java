@@ -63,6 +63,7 @@ public class NotificationController {
             item.put("reply_id", n.replyId());
             item.put("title", n.title());
             item.put("content", n.content());
+            item.put("media", n.media());
             item.put("is_read", n.isRead());
             item.put("created_at", n.createdAt());
             result.add(item);

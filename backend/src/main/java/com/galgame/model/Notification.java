@@ -19,5 +19,6 @@ public record Notification(
         String title,
         String content,
         boolean isRead,
-        LocalDateTime createdAt) {
+        LocalDateTime createdAt,
+        String media) {
 }

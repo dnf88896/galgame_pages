@@ -23,13 +23,15 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.galgame.auth.AuthContext;
 import com.galgame.auth.TokenService;
+import com.galgame.config.AdminLevels;
+import com.galgame.dao.AuthTokenDao;
 import com.galgame.dao.UserDao;
 import com.galgame.model.User;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
- * 账号接口：注册 / 登录 / 登出 / 当前用户 / 修改签名 / 上传头像。
+ * 账号接口：注册 / 登录 / 登出 / 当前用户 / 修改签名 / 上传头像 / 管理员认证。
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -42,11 +44,14 @@ public class AuthController {
     private final UserDao userDao;
     private final TokenService tokenService;
     private final PasswordEncoder passwordEncoder;
+    private final AuthTokenDao authTokenDao;
 
-    public AuthController(UserDao userDao, TokenService tokenService, PasswordEncoder passwordEncoder) {
+    public AuthController(UserDao userDao, TokenService tokenService, PasswordEncoder passwordEncoder,
+                          AuthTokenDao authTokenDao) {
         this.userDao = userDao;
         this.tokenService = tokenService;
         this.passwordEncoder = passwordEncoder;
+        this.authTokenDao = authTokenDao;
     }
 
     /** 1. 注册（注册即登录），返回明文 token + user */
@@ -102,18 +107,47 @@ public class AuthController {
         return ResponseEntity.ok(user);
     }
 
-    /** 5. 修改签名（需登录） */
+    /** 5. 修改资料（需登录）：部分更新——body 里只更新出现的字段（bio 缺省不清空、hide_favorites 缺省不动） */
     @PutMapping("/profile")
     public ResponseEntity<Object> updateProfile(@RequestBody(required = false) Map<String, String> body,
                                                 HttpServletRequest request) {
         long userId = AuthContext.currentUserId(request);
-        String bio = body == null ? "" : trim(body.get("bio"));
-        if (bio.length() > 200) {
-            return ResponseEntity.badRequest().body(Map.of("error", "签名过长。"));
+        // bio：仅在显式提供时更新；缺省保持原签名
+        if (body != null && body.containsKey("bio")) {
+            String bio = body.get("bio") == null ? "" : body.get("bio").trim();
+            if (bio.length() > 200) {
+                return ResponseEntity.badRequest().body(Map.of("error", "签名过长。"));
+            }
+            userDao.updateBio(userId, bio);
         }
-        userDao.updateBio(userId, bio);
+        // hide_favorites：可选（"true"/"1" → 1 隐藏，其余 → 0 公开）
+        if (body != null && body.containsKey("hide_favorites")) {
+            String v = body.get("hide_favorites");
+            int val = ("true".equalsIgnoreCase(v) || "1".equals(v)) ? 1 : 0;
+            userDao.updateHideFavorites(userId, val);
+        }
         User user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
         return ResponseEntity.ok(user);
+    }
+
+    /** 5.5 修改密码（需登录）：校验旧密码后更新，并删除该用户全部 token 使旧会话失效 */
+    @PutMapping("/password")
+    public ResponseEntity<Object> changePassword(@RequestBody(required = false) Map<String, String> body,
+                                                 HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        String oldPassword = body == null ? "" : (body.get("old_password") == null ? "" : body.get("old_password"));
+        String newPassword = body == null ? "" : (body.get("new_password") == null ? "" : body.get("new_password"));
+        String hash = userDao.findPasswordHashById(userId)
+                .orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        if (!passwordEncoder.matches(oldPassword, hash)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "旧密码错误。"));
+        }
+        if (newPassword.length() < 6) {
+            return ResponseEntity.badRequest().body(Map.of("error", "密码至少 6 位。"));
+        }
+        userDao.updatePassword(userId, passwordEncoder.encode(newPassword));
+        authTokenDao.deleteByUser(userId);
+        return ResponseEntity.ok(Map.of());
     }
 
     /** 6. 上传头像（需登录），multipart 字段 file */
@@ -143,6 +177,24 @@ public class AuthController {
         } catch (IOException e) {
             throw new IllegalStateException("头像保存失败", e);
         }
+    }
+
+    /** 7. 管理员认证（需登录）：输入管理员权限密码，正确则把账号提升到对应权限等级 */
+    @PostMapping("/admin-verify")
+    public ResponseEntity<Object> adminVerify(@RequestBody(required = false) Map<String, String> body,
+                                              HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        String password = body == null ? "" : (body.get("password") == null ? "" : body.get("password"));
+        Integer level = AdminLevels.resolve(password);
+        if (level == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "管理员密码错误。"));
+        }
+        User user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        if (user.adminLevel() == null || user.adminLevel() < level) {
+            userDao.grantAdminLevel(userId, level);
+            user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        }
+        return ResponseEntity.ok(user);
     }
 
     // ── 私有辅助 ─────────────────────────────

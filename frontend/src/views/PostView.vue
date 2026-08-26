@@ -52,8 +52,31 @@
             >
               {{ post.liked ? '♥' : '♡' }} {{ post.like_count }}
             </button>
+            <button
+              class="favorite-button"
+              :class="{ favorited: post.favorited }"
+              type="button"
+              :disabled="postFavoriting"
+              @click="togglePostFavorite"
+            >
+              {{ post.favorited ? '★ 已收藏' : '☆ 收藏' }}
+            </button>
+            <el-button
+              v-if="!isOwner"
+              size="small"
+              type="danger"
+              plain
+              @click="openReport('post', post.id)"
+            >举报</el-button>
             <span class="stat-chip">回复 {{ post.reply_count }}</span>
             <span class="stat-chip">浏览 {{ post.view_count }}</span>
+            <el-button
+              v-if="isAdmin"
+              size="small"
+              type="primary"
+              plain
+              @click="openCategoryDialog"
+            >修改分区</el-button>
             <el-button
               v-if="isOwner"
               type="danger"
@@ -105,6 +128,12 @@
                 </button>
                 <el-button link size="small" @click="replyingTo = r">回复</el-button>
                 <el-button
+                  v-if="!(user && Number(r.user_id) === Number(user.id))"
+                  link
+                  size="small"
+                  @click="openReport('reply', r.id)"
+                >举报</el-button>
+                <el-button
                   v-if="user && Number(r.user_id) === Number(user.id)"
                   link
                   type="danger"
@@ -149,6 +178,42 @@
             </template>
           </div>
         </el-card>
+
+        <el-dialog
+          v-model="reportDialogVisible"
+          title="举报"
+          width="440px"
+          :close-on-click-modal="false"
+          @closed="reportReason = ''"
+        >
+          <el-input
+            v-model="reportReason"
+            type="textarea"
+            :rows="3"
+            maxlength="200"
+            show-word-limit
+            placeholder="请说明举报原因（可选），如广告、辱骂、违规内容等"
+          />
+          <template #footer>
+            <el-button @click="reportDialogVisible = false">取消</el-button>
+            <el-button type="danger" :loading="reportSubmitting" @click="submitReport">提交举报</el-button>
+          </template>
+        </el-dialog>
+
+        <el-dialog
+          v-model="categoryDialogVisible"
+          title="修改分区"
+          width="420px"
+          :close-on-click-modal="false"
+        >
+          <el-select v-model="editCategory" placeholder="选择分区" style="width: 100%">
+            <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+          </el-select>
+          <template #footer>
+            <el-button @click="categoryDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="categorySaving" @click="saveCategory">保存</el-button>
+          </template>
+        </el-dialog>
       </template>
     </template>
   </div>
@@ -161,7 +226,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import AttachmentList from '../components/AttachmentList.vue'
 import { token, user, requireLogin } from '../store/user'
-import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage } from '../utils/format'
+import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage, categories } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -198,7 +263,39 @@ const isOwner = computed(
 )
 const deleting = ref(false)
 
+// 当前登录用户是否为管理员（决定是否显示「修改分区」入口）
+const isAdmin = computed(() => !!user.value && Number(user.value.admin_level) > 0)
+
+// 修改分区弹窗
+const categoryDialogVisible = ref(false)
+const editCategory = ref('')
+const categorySaving = ref(false)
+
+function openCategoryDialog() {
+  editCategory.value = post.value.category
+  categoryDialogVisible.value = true
+}
+
+async function saveCategory() {
+  if (!editCategory.value) {
+    ElMessage.warning('请选择分区')
+    return
+  }
+  categorySaving.value = true
+  try {
+    const { data } = await api.put(`/posts/${post.value.id}/category`, { category: editCategory.value })
+    post.value.category = data.category || editCategory.value
+    categoryDialogVisible.value = false
+    ElMessage.success('分区已更新')
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '修改分区失败'))
+  } finally {
+    categorySaving.value = false
+  }
+}
+
 const postLiking = ref(false)
+const postFavoriting = ref(false)
 const replyLiking = reactive(new Set())
 
 const replyForm = reactive({ content: '' })
@@ -208,6 +305,12 @@ const replyStatusError = ref(false)
 
 // 正在回复的目标回复对象（null 表示普通回复）
 const replyingTo = ref(null)
+
+// 举报弹窗状态
+const reportDialogVisible = ref(false)
+const reportSubmitting = ref(false)
+const reportTarget = ref(null) // { type: 'post' | 'reply', id: number }
+const reportReason = ref('')
 
 // silent：静默刷新（如回复成功后整页重拉详情），不闪烁骨架屏
 async function load({ silent = false } = {}) {
@@ -247,6 +350,21 @@ async function togglePostLike() {
     ElMessage.error(getErrorMessage(e, '点赞失败'))
   } finally {
     postLiking.value = false
+  }
+}
+
+async function togglePostFavorite() {
+  if (!requireLogin(router)) return
+  if (!post.value || postFavoriting.value) return
+  postFavoriting.value = true
+  try {
+    const { data } = await api.post(`/posts/${post.value.id}/favorite`)
+    // 收藏状态直接用服务端返回的新状态
+    post.value.favorited = data.favorited
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  } finally {
+    postFavoriting.value = false
   }
 }
 
@@ -354,6 +472,31 @@ async function deleteReply(reply) {
   }
 }
 
+// 打开举报弹窗（帖子或回复），需登录
+function openReport(type, id) {
+  if (!requireLogin(router)) return
+  reportTarget.value = { type, id }
+  reportReason.value = ''
+  reportDialogVisible.value = true
+}
+
+// 提交举报
+async function submitReport() {
+  if (!reportTarget.value) return
+  reportSubmitting.value = true
+  try {
+    const { type, id } = reportTarget.value
+    const url = type === 'post' ? `/posts/${id}/report` : `/replies/${id}/report`
+    await api.post(url, { reason: reportReason.value.trim() })
+    reportDialogVisible.value = false
+    ElMessage.success('举报已提交，感谢反馈')
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '举报失败'))
+  } finally {
+    reportSubmitting.value = false
+  }
+}
+
 watch(
   () => route.params.id,
   () => {
@@ -443,6 +586,30 @@ onMounted(() => {
 .like-button.small {
   padding: 3px 10px;
   font-size: 12px;
+}
+.favorite-button {
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.favorite-button:hover {
+  color: #e6a23c;
+  border-color: #e6a23c;
+}
+.favorite-button.favorited {
+  color: #e6a23c;
+  border-color: #e6a23c;
+  background: #fdf6ec;
+}
+.favorite-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .stat-chip {
   color: #888;

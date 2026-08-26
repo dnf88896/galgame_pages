@@ -60,7 +60,8 @@ public class PostDao {
 
     /**
      * 帖子列表。按过滤条件动态拼接 WHERE：q 做关键词模糊匹配，category 做分区精确过滤，
-     * 均为空则返回全部。section 过滤改为通过 post_tags 关联表 EXISTS 判断（一帖可挂多个标签）。
+     * 均为空则返回全部。sections 支持多标签 AND 过滤（?sections=a,b,c 或重复参数）：
+     * 每个标签通过 post_tags 关联表一条 EXISTS 判断，一帖须同时拥有所有指定标签（一帖可挂多个标签）。
      * hiddenAuthorIds 为对当前查看者不可见的作者集合（屏蔽是双向的），
      * 非空时追加 (user_id IS NULL OR user_id NOT IN (...)) 条件；user_id 为 NULL 的旧数据始终可见。
      * 以后新增过滤维度（作者、时间范围、排序等）在此追加一段即可。
@@ -74,9 +75,11 @@ public class PostDao {
                 where.add("category = ?");
                 args.add(filter.category());
             }
-            if (filter.section() != null) {
-                where.add("EXISTS (SELECT 1 FROM post_tags pt WHERE pt.post_id = posts.id AND pt.section_key = ?)");
-                args.add(filter.section());
+            if (filter.sections() != null) {
+                for (String s : filter.sections()) {
+                    where.add("EXISTS (SELECT 1 FROM post_tags pt WHERE pt.post_id = posts.id AND pt.section_key = ?)");
+                    args.add(s);
+                }
             }
             if (filter.q() != null) {
                 where.add("(title LIKE ? OR content LIKE ? OR author LIKE ? OR category LIKE ?)");
@@ -130,6 +133,11 @@ public class PostDao {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM posts WHERE id = ?", Integer.class, id);
         return count != null && count > 0;
+    }
+
+    /** 修改帖子分区（管理员操作） */
+    public void updateCategory(Long postId, String category) {
+        jdbcTemplate.update("UPDATE posts SET category = ? WHERE id = ?", category, postId);
     }
 
     /** 新增帖子（含 tags），返回数据库生成的自增 id；写 posts 与 post_tags 在同一事务 */
@@ -230,6 +238,14 @@ public class PostDao {
         return count != null && count > 0;
     }
 
+    /** 判断某用户是否收藏过该帖子 */
+    public boolean isFavorited(Long postId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_favorites WHERE post_id = ? AND user_id = ?",
+                Integer.class, postId, userId);
+        return count != null && count > 0;
+    }
+
     /**
      * 帖子点赞 toggle。已赞则取消，未赞则点赞，并同步 posts.like_count。
      * 整个操作在一个事务里完成；帖子不存在时返回 empty。
@@ -259,6 +275,28 @@ public class PostDao {
     }
 
     /**
+     * 帖子收藏 toggle。已收藏则取消收藏，未收藏则收藏。
+     * 收藏无计数，无需同步 posts 表；整个操作在一个事务里完成；帖子不存在时返回 empty。
+     */
+    @Transactional
+    public Optional<Boolean> toggleFavorite(Long postId, Long userId) {
+        if (!existsById(postId)) {
+            return Optional.empty();
+        }
+        boolean favorited;
+        if (isFavorited(postId, userId)) {
+            jdbcTemplate.update(
+                    "DELETE FROM post_favorites WHERE post_id = ? AND user_id = ?", postId, userId);
+            favorited = false;
+        } else {
+            jdbcTemplate.update(
+                    "INSERT INTO post_favorites (post_id, user_id) VALUES (?, ?)", postId, userId);
+            favorited = true;
+        }
+        return Optional.of(favorited);
+    }
+
+    /**
      * 删除帖子。仅当该帖 user_id 与当前用户匹配时才删除（防删他人帖子）。
      * 回复/点赞/附件记录由外键 ON DELETE CASCADE 一并清除，附件文件由调用方清理。
      */
@@ -266,6 +304,11 @@ public class PostDao {
     public boolean deleteByIdAndUser(Long postId, Long userId) {
         return jdbcTemplate.update(
                 "DELETE FROM posts WHERE id = ? AND user_id = ?", postId, userId) > 0;
+    }
+
+    /** 无条件删除帖子（管理员处理举报用）；回复/点赞/附件/收藏/通知由外键级联，附件文件由调用方清理 */
+    public boolean deleteById(Long postId) {
+        return jdbcTemplate.update("DELETE FROM posts WHERE id = ?", postId) > 0;
     }
 
     // ── 用户公开资料统计 ─────────────────────
@@ -283,6 +326,28 @@ public class PostDao {
                 "SELECT COUNT(*) FROM post_likes l JOIN posts p ON l.post_id = p.id WHERE p.user_id = ?",
                 Integer.class, userId);
         return count == null ? 0 : count;
+    }
+
+    /** 该用户收藏的帖子总数 */
+    public int countFavorites(Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_favorites WHERE user_id = ?", Integer.class, userId);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * 该用户收藏的帖子列表（按收藏时间倒序）。
+     * 注意：JOIN 查询里 id/user_id/created_at 在 posts 与 post_favorites 两表中均存在，
+     * 为避免歧义，基础列显式加了 p. 前缀（结果集列名不受影响，POST_ROW_MAPPER 仍按列名取值）。
+     */
+    public List<Post> findFavoritesByUser(Long userId) {
+        String sql = "SELECT p.id, p.user_id, p.author, p.category, p.title, p.content, "
+                + "p.created_at, p.reply_count, p.view_count, p.like_count "
+                + "FROM post_favorites pf JOIN posts p ON p.id = pf.post_id "
+                + "WHERE pf.user_id = ? ORDER BY pf.created_at DESC, p.id DESC";
+        List<Post> posts = new ArrayList<>(jdbcTemplate.query(sql, POST_ROW_MAPPER, userId));
+        attachTags(posts);
+        return posts;
     }
 
     /** 该用户最新发布的 N 条帖子 */

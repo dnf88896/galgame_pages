@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -75,14 +76,15 @@ public class PostController {
         this.mentionService = mentionService;
     }
 
-    /** 1. 帖子列表（公开），?q= 关键词搜索、?category= 分区过滤、?section= 小分支过滤，均可选 */
+    /** 1. 帖子列表（公开），?q= 关键词、?category= 分区、?sections= 多标签（逗号分隔或重复参数，AND 语义，可配合旧 ?section=），均可选 */
     @GetMapping
     public ResponseEntity<Object> list(
             @RequestParam(value = "q", required = false) String q,
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "section", required = false) String section,
+            @RequestParam(value = "sections", required = false) List<String> sections,
             HttpServletRequest request) {
-        PostFilter filter = PostFilter.of(q, category, section);
+        PostFilter filter = PostFilter.of(q, category, section, sections);
         // 屏蔽是双向的：不可见作者 = 我屏蔽的人 ∪ 屏蔽我的人；未登录则为空集合
         Optional<Long> uid = tokenService.resolveUserId(request.getHeader("Authorization"));
         Set<Long> hidden = new HashSet<>();
@@ -97,7 +99,7 @@ public class PostController {
         List<Long> ids = posts.stream().map(Post::id).toList();
         Map<Long, List<Attachment>> attachmentsByPost = attachmentDao.findByPostIds(ids);
         List<Post> result = posts.stream()
-                .map(p -> p.withContext(null, attachmentsByPost.getOrDefault(p.id(), List.of()), null))
+                .map(p -> p.withContext(null, null, attachmentsByPost.getOrDefault(p.id(), List.of()), null))
                 .toList();
         return ResponseEntity.ok(result);
     }
@@ -132,10 +134,12 @@ public class PostController {
         List<Reply> replies = replyDao.findByPostId(id);
 
         boolean liked = false;
+        boolean favorited = false;
         Set<Long> likedReplyIds = new HashSet<>();
         if (currentUserId.isPresent()) {
             long uid = currentUserId.get();
             liked = postDao.isLiked(id, uid);
+            favorited = postDao.isFavorited(id, uid);
             if (!replies.isEmpty()) {
                 likedReplyIds = replyDao.findLikedReplyIds(replies.stream().map(Reply::id).toList(), uid);
             }
@@ -145,7 +149,7 @@ public class PostController {
                 .map(r -> r.withLiked(likedSet.contains(r.id())))
                 .toList();
 
-        return ResponseEntity.ok(post.withContext(liked, attachments, repliesWithLiked));
+        return ResponseEntity.ok(post.withContext(liked, favorited, attachments, repliesWithLiked));
     }
 
     /** 3a. 新建帖子（需登录，multipart/form-data，可带多个 attachments 文件） */
@@ -219,7 +223,45 @@ public class PostController {
         return ResponseEntity.ok(Map.<String, Object>of("liked", result.get().liked(), "like_count", result.get().likeCount()));
     }
 
-    /** 6. 删除自己的帖子（需登录 + 作者本人） */
+    /** 5b. 帖子收藏 toggle（需登录，按 user_id 去重，收藏无计数） */
+    @PostMapping("/{id}/favorite")
+    public ResponseEntity<Object> toggleFavorite(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+        long userId = AuthContext.currentUserId(request);
+        Optional<Boolean> result = postDao.toggleFavorite(id, userId);
+        if (result.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        return ResponseEntity.ok(Map.<String, Object>of("favorited", result.get()));
+    }
+
+    /** 6a. 修改帖子分区（需登录 + 管理员）：body {category}，返回 {ok, category} */
+    @PutMapping("/{id}/category")
+    public ResponseEntity<Object> updateCategory(@PathVariable Long id,
+                                                 @RequestBody(required = false) Map<String, Object> body,
+                                                 HttpServletRequest request) {
+        long currentUserId = AuthContext.currentUserId(request);
+        User current = userDao.findById(currentUserId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
+        if (current.adminLevel() == null || current.adminLevel() < 1) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "需要管理员权限。"));
+        }
+        if (!postDao.existsById(id)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
+        }
+        Object catObj = body == null ? null : body.get("category");
+        String category = catObj == null ? null : catObj.toString().trim();
+        if (category == null || category.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "分区不能为空。"));
+        }
+        if (category.length() > 32) {
+            return ResponseEntity.badRequest().body(Map.of("error", "字段长度超出限制。"));
+        }
+        postDao.updateCategory(id, category);
+        return ResponseEntity.ok(Map.of("ok", true, "category", category));
+    }
+
+    /** 6b. 删除自己的帖子（需登录 + 作者本人） */
     @DeleteMapping("/{id}")
     public ResponseEntity<Object> deletePost(@PathVariable Long id, HttpServletRequest request) {
         if (!postDao.existsById(id)) {
@@ -310,7 +352,7 @@ public class PostController {
         Post post = opt.orElseThrow(() -> new IllegalStateException("写入的帖子读取失败"));
         mentionService.notifyMention(userId, postId, null, title, content);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(post.withContext(false, attachments, List.of()));
+                .body(post.withContext(false, null, attachments, List.of()));
     }
 
     private ResponseEntity<Object> doCreateReply(Long postId, String contentRaw, long userId, Long parentId) {

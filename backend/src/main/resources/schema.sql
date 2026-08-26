@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(100) NOT NULL,
     avatar_url    VARCHAR(500) NULL,
     bio           VARCHAR(200) NULL,
+    admin_level   INT          NOT NULL DEFAULT 0 COMMENT '管理员权限等级，0=普通用户，1+ 由管理员密码认证授予',
+    hide_favorites TINYINT     NOT NULL DEFAULT 0 COMMENT '是否隐藏收藏夹（0=公开，1=仅自己可见）',
+    ban_until      DATETIME     NULL COMMENT '封禁截止时间，NULL=未封禁，2099-12-31 23:59:59=永久封禁；过期自动视为解封',
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_users_username (username)
@@ -164,6 +167,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     reply_id   BIGINT       NULL,
     title      VARCHAR(100) NULL,
     content    VARCHAR(500) NULL,
+    media      TEXT         NULL COMMENT '媒体附件 JSON（[{url,mime,name}]，公告广播用）',
     is_read    TINYINT(1)   NOT NULL DEFAULT 0,
     created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -172,4 +176,60 @@ CREATE TABLE IF NOT EXISTS notifications (
     CONSTRAINT fk_notifications_actor FOREIGN KEY (actor_id) REFERENCES users (id)  ON DELETE SET NULL,
     CONSTRAINT fk_notifications_post  FOREIGN KEY (post_id)  REFERENCES posts (id)  ON DELETE CASCADE,
     CONSTRAINT fk_notifications_reply FOREIGN KEY (reply_id) REFERENCES replies (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 作品库：管理员「添加galgame」维护。字段为 TEXT/较长 VARCHAR 留扩展空间，
+-- 后续需要追加信息（评分/发售日期/厂商官网等）时直接加列即可；links 存 JSON 数组文本（[{label,url}]）。
+CREATE TABLE IF NOT EXISTS galgames (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(200) NOT NULL COMMENT 'Galgame 名称',
+    description TEXT         NULL COMMENT '简介',
+    image       VARCHAR(500) NULL COMMENT '封面图 URL（本地上传 /uploads/galgame_images/ 或外部链接）',
+    staff       VARCHAR(500) NULL COMMENT '制作人员 / 会社',
+    links       TEXT         NULL COMMENT '资源链接 JSON 数组文本（[{label,url}]）',
+    created_by  BIGINT       NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_galgames_name (name),
+    CONSTRAINT fk_galgames_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame-标签多对多：标签复用 galgame-resource 大类下的 gg-* section_key。
+CREATE TABLE IF NOT EXISTS galgame_tags (
+    galgame_id  BIGINT      NOT NULL,
+    section_key VARCHAR(32) NOT NULL,
+    PRIMARY KEY (galgame_id, section_key),
+    KEY idx_galgame_tags_section (section_key),
+    CONSTRAINT fk_galgame_tags_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 收藏夹：用户收藏帖子（user_id 收藏 post_id），公开可见，可选隐藏（users.hide_favorites）。
+CREATE TABLE IF NOT EXISTS post_favorites (
+    post_id     BIGINT       NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (post_id, user_id),
+    KEY idx_post_favorites_user (user_id),
+    CONSTRAINT fk_post_favorites_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE,
+    CONSTRAINT fk_post_favorites_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 举报：用户举报帖子或评论。target_type 区分 post/reply；同一举报人对同一目标只记一条（UNIQUE）。
+-- status：0=待处理，1=已删除，2=已忽略；result 为处理结果（用于通知举报人）。
+CREATE TABLE IF NOT EXISTS reports (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    reporter_id BIGINT       NOT NULL COMMENT '举报人',
+    target_type VARCHAR(10)  NOT NULL DEFAULT 'post' COMMENT 'post=帖子 / reply=评论',
+    target_id   BIGINT       NOT NULL COMMENT '被举报目标 id',
+    reason      VARCHAR(200) NULL COMMENT '举报原因（可选）',
+    status      TINYINT      NOT NULL DEFAULT 0 COMMENT '0=待处理，1=已删除，2=已忽略',
+    handled_at  DATETIME     NULL COMMENT '处理时间',
+    result      VARCHAR(50)  NULL COMMENT '处理结果（供通知举报人）',
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_reports_reporter_target (reporter_id, target_type, target_id),
+    KEY idx_reports_target (target_type, target_id),
+    KEY idx_reports_status (status, id),
+    CONSTRAINT fk_reports_user FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

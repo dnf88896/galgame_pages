@@ -1,0 +1,476 @@
+/* =====================================================================
+   theme.css —— 全局主题（浅色 / 深色 / 自定义背景 / 页面透明度）
+
+   契约（由设置 store 写入 <html>）：
+     - 类  .dark              theme==='dark' 时加到 <html>
+     - var --page-opacity      数值 0.6~1，作用于页面内容透明度
+     - var --bg-brightness     数值 0.4~1.5，作用于背景图片层亮度
+     - var --custom-bg         形如 url("data:...")，无背景时该变量被移除
+
+   本文件只收敛覆盖，不改任何组件的 scoped 样式。
+   ===================================================================== */
+
+
+/* ============================ 1. 变量默认值 ============================ */
+/* 设置 store 会以行内样式覆盖这些默认值 */
+:root {
+  --page-opacity: 1;
+  --bg-brightness: 1;
+}
+
+
+/* ============================ 2. body 基础背景 ============================ */
+body {
+  min-height: 100vh;
+  background-color: #f0f2f5;          /* 浅色默认背景 */
+  transition: background-color 0.3s;
+}
+
+html.dark body {
+  background-color: #141414;          /* 深色默认背景 */
+}
+
+/* 自定义背景图片层：固定在视口、放在内容后面、亮度可调 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: var(--custom-bg, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: brightness(var(--bg-brightness));
+  pointer-events: none;
+}
+
+
+/* ============================ 3. 页面内容透明度 ============================ */
+/* 顶栏 .nav-bar 不在 .app-main 内，因此保持不透明 */
+.app-main {
+  opacity: var(--page-opacity);
+  transition: opacity 0.3s;
+}
+
+
+/* ============================ 4. Element Plus 暗色 + 滚动条 ============================ */
+/* EP 暗色变量（element-plus/theme-chalk/dark/css-vars.css）依赖 html.dark 生效 */
+html.dark {
+  color-scheme: dark;
+}
+
+/* 深色模式自定义滚动条（美观用，WebKit + Firefox 双支持） */
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #3a3a3c;
+  border-radius: 4px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4d;
+}
+html.dark {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3c transparent;
+}
+
+
+/* =====================================================================
+   5. html.dark 覆盖：项目自定义组件写死的浅色表面 / 文字
+   （选择器特异性控制在 html.dark .xxx，优先级高于各组件的 scoped 样式）
+   ===================================================================== */
+
+/* ---- 5.1 深色表面：白底卡片 / 面板 / 列表项 → 深灰 ---- */
+html.dark .nav-bar,
+html.dark .post-card,
+html.dark .side-nav,
+html.dark .left-nav,
+html.dark .left-nav-sub,
+html.dark .status-block,
+html.dark .category-header,
+html.dark .section-cell,
+html.dark .conv-item,
+html.dark .notif-item,
+html.dark .attachment,
+html.dark .bubble,
+html.dark .stat,
+html.dark .gal-filters {
+  background: #1d1e1f;
+}
+
+/* 点赞按钮白底 → 深灰 */
+html.dark .like-button {
+  background: #1d1e1f;
+}
+
+/* 次要面板底色（#f5f7fa → 略浅的深灰，用于分区统计小卡等） */
+html.dark .profile-stats .stat {
+  background: #2a2a2c;
+}
+
+
+/* ---- 5.2 边框：#e4e7ed / #dcdfe6 / #ebeef5 → 深灰 ---- */
+html.dark .nav-bar,
+html.dark .post-card,
+html.dark .side-nav,
+html.dark .left-nav-sub,
+html.dark .status-block,
+html.dark .category-header,
+html.dark .section-cell,
+html.dark .conv-item,
+html.dark .notif-item,
+html.dark .stat,
+html.dark .bubble,
+html.dark .left-nav,
+html.dark .chat-header,
+html.dark .chat-input,
+html.dark .attachment,
+html.dark .like-button,
+html.dark .gal-filters {
+  border-color: #3a3a3c;
+}
+
+/* 分区卡片 hover 保持主色描边 + 深色投影 */
+html.dark .section-cell:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
+}
+
+
+/* ---- 5.3 阴影：过亮的浅色投影 → 深色投影 ---- */
+html.dark .post-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+html.dark .left-nav-sub {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+html.dark .conv-item:hover,
+html.dark .notif-item.clickable:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+
+/* ---- 5.4 次要文字：#666 / #888 / #909399 → 深色下提亮 ---- */
+/* 一级次要文字（正文摘要、作者行、标签区等） */
+html.dark .post-top,
+html.dark .reply-top,
+html.dark .attachments-head,
+html.dark .category-desc,
+html.dark .left-nav-btn,
+html.dark .left-nav-sub-btn,
+html.dark .picked-size,
+html.dark .stat-chip,
+html.dark .excerpt,
+html.dark .replying-to,
+html.dark .login-prompt,
+html.dark .avatar-upload,
+html.dark .profile-bio,
+html.dark .like-button {
+  color: #c0c4cc;
+}
+
+/* 二级弱化文字 / 占位 / 计数（#999 / #909399） */
+html.dark .time,
+html.dark .recent-time,
+html.dark .conv-time,
+html.dark .notif-time,
+html.dark .msg-time,
+html.dark .dot,
+html.dark .category-count,
+html.dark .section-count,
+html.dark .board-count,
+html.dark .section-cell-count,
+html.dark .board-desc,
+html.dark .side-title,
+html.dark .stat-label,
+html.dark .reply-parent,
+html.dark .empty,
+html.dark .reply-empty,
+html.dark .recent-empty,
+html.dark .msg-empty,
+html.dark .status-box,
+html.dark .chat-title,
+html.dark .conv-preview,
+html.dark .notif-preview,
+html.dark .user-bio,
+html.dark .profile-meta,
+html.dark .attachment-file,
+html.dark .attachment-meta {
+  color: #8c8c90;
+}
+
+/* 圆点分隔符单独再暗一点，避免刺眼 */
+html.dark .dot {
+  color: #4e4e50;
+}
+
+
+/* ---- 5.5 主文字：#303133 / #333 → 提亮为浅色 ---- */
+html.dark .nav-brand,
+html.dark .nav-user,
+html.dark .chat-user,
+html.dark .board-name,
+html.dark .section-cell-label,
+html.dark .author,
+html.dark .reply-author,
+html.dark .content,
+html.dark .reply-content,
+html.dark .profile-name,
+html.dark .profile-stats .stat-value,
+html.dark .edit-title,
+html.dark .recent-title,
+html.dark .conv-name,
+html.dark .notif-title,
+html.dark .user-name,
+html.dark .attachment-name,
+html.dark .bubble {
+  color: #e5e6eb;
+}
+
+
+/* ---- 5.6 次要底色（chip / 标签条：#f5f7fa / #f0f2f5 → 深灰） ---- */
+html.dark .stat-chip,
+html.dark .picked-item,
+html.dark .attachment-media,
+html.dark .board-count,
+html.dark .section-cell-count {
+  background: #2a2a2c;
+}
+
+/* 粉色爱心 chip / 已点赞按钮：保留粉色主色，底色换深色 */
+html.dark .stat-chip.heart {
+  color: #f56c9a;
+  background: rgba(245, 108, 154, 0.12);
+}
+html.dark .like-button.liked {
+  color: #f56c9a;
+  border-color: #f56c9a;
+  background: rgba(245, 108, 154, 0.12);
+}
+
+
+/* ---- 5.7 高亮底色（选中 / hover：#ecf5ff / #f0f7ff → 深蓝） ---- */
+html.dark .left-nav-btn:hover,
+html.dark .left-nav-sub-btn:hover,
+html.dark .board-btn.active,
+html.dark .profile-stats a.stat:hover,
+html.dark .replying-label,
+html.dark .notif-item.unread {
+  background: #1f3a5f;
+}
+
+/* 分区按钮普通 hover 底色 */
+html.dark .board-btn:hover {
+  background: #2a2a2c;
+}
+
+/* 选中分区的主色文字与计数 */
+html.dark .board-btn.active .board-name {
+  color: #409eff;
+}
+html.dark .board-btn.active .board-count {
+  background: rgba(64, 158, 255, 0.25);
+  color: #409eff;
+}
+
+/* 左侧导航 hover 文字保持主色（在深蓝底上可读） */
+html.dark .left-nav-btn:hover,
+html.dark .left-nav-sub-btn:hover {
+  color: #409eff;
+}
+
+
+/* ---- 5.8 分割线：#f0f0f0 / #f0f2f5 → 深灰 ---- */
+html.dark .reply,
+html.dark .recent-item,
+html.dark .user-item,
+html.dark .side-title {
+  border-bottom-color: #2a2a2c;
+}
+
+
+/* ---- 5.9 GalgameView 筛选按钮（深色覆盖） ---- */
+html.dark .gal-filter-btn { color: #c0c4cc; }
+html.dark .gal-filter-btn:hover { background: #2a2a2c; }
+html.dark .gal-filter-btn.active { background: #1f3a5f; color: #409eff; }
+
+
+/* ---- 5.10 GalgameView 卡片列表 + AddGalgameView 添加页（深色覆盖） ---- */
+/* 白底卡片 / 骨架卡 / 权限提示卡 → 深灰 */
+html.dark .gal-card,
+html.dark .gal-skel-card,
+html.dark .add-card,
+html.dark .add-denied {
+  background: #1d1e1f;
+}
+
+/* 边框：#e4e7ed → 深灰 */
+html.dark .gal-card,
+html.dark .gal-skel-card,
+html.dark .add-card,
+html.dark .add-denied,
+html.dark .add-cover-preview img {
+  border-color: #3a3a3c;
+}
+
+/* 卡片投影：过亮的浅色投影 → 深色投影 */
+html.dark .gal-card,
+html.dark .gal-skel-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 卡片可点击 hover 反馈（点击进入详情）：主色描边 + 深色投影 */
+html.dark .gal-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+}
+
+/* 封面区（无图占位块）底色 */
+html.dark .gal-cover {
+  background: #2a2a2c;
+}
+html.dark .gal-cover-placeholder {
+  background: #2a2a2c;
+  color: #8c8c90;
+}
+
+/* 卡片主文字 */
+html.dark .gal-name {
+  color: #e5e6eb;
+}
+
+/* 次级文字：#666 / #888 → 提亮 */
+html.dark .gal-staff,
+html.dark .gal-no-link,
+html.dark .add-hint {
+  color: #8c8c90;
+}
+html.dark .gal-desc {
+  color: #c0c4cc;
+}
+
+/* 标签 chip / 资源链接按钮：浅蓝底 → 深蓝底 */
+html.dark .gal-tag {
+  background: #1f3a5f;
+  color: #66b1ff;
+}
+html.dark .gal-link {
+  background: #1f3a5f;
+  border-color: #2f5a8f;
+  color: #66b1ff;
+}
+html.dark .gal-link:hover {
+  background: #409eff;
+  border-color: #409eff;
+  color: #fff;
+}
+
+/* 添加页封面预览占位底色 */
+html.dark .add-cover-preview img {
+  background: #2a2a2c;
+}
+
+/* 权限提示文字 */
+html.dark .add-denied p {
+  color: #c0c4cc;
+}
+
+
+/* ---- 5.11 GalgameDetailView 详情页（深色覆盖） ---- */
+/* 白底详情卡片 / 骨架卡 / 404 空卡 → 深灰 */
+html.dark .gal-detail-card,
+html.dark .gal-detail-skel,
+html.dark .gal-detail-empty {
+  background: #1d1e1f;
+}
+
+/* 边框：#e4e7ed → 深灰 */
+html.dark .gal-detail-card,
+html.dark .gal-detail-skel,
+html.dark .gal-detail-empty,
+html.dark .gal-detail-cover {
+  border-color: #3a3a3c;
+}
+
+/* 详情卡片投影：过亮的浅色投影 → 深色投影 */
+html.dark .gal-detail-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 大封面区（无图占位块）底色 */
+html.dark .gal-detail-cover,
+html.dark .gal-detail-cover-placeholder {
+  background: #2a2a2c;
+}
+html.dark .gal-detail-cover-placeholder {
+  color: #8c8c90;
+}
+
+/* 详情主文字 */
+html.dark .gal-detail-name {
+  color: #e5e6eb;
+}
+
+/* 次级文字：#666 / #888 / #909399 → 提亮 */
+html.dark .gal-detail-staff,
+html.dark .gal-detail-meta,
+html.dark .gal-detail-empty-text {
+  color: #8c8c90;
+}
+html.dark .gal-detail-desc {
+  color: #c0c4cc;
+}
+
+
+/* ---- 5.12 收藏（PostView 收藏按钮 + ProfileView 收藏统计 + FavoritesView 收藏夹页） ---- */
+/* 收藏按钮：白底 → 深灰 */
+html.dark .favorite-button {
+  background: #1d1e1f;
+}
+
+/* 收藏按钮边框：#dcdfe6 → 深灰 */
+html.dark .favorite-button {
+  border-color: #3a3a3c;
+}
+
+/* 收藏按钮文字（未收藏态） */
+html.dark .favorite-button {
+  color: #c0c4cc;
+}
+
+/* 已收藏态：金色主色 + 深色底 */
+html.dark .favorite-button.favorited {
+  color: #e6a23c;
+  border-color: #e6a23c;
+  background: rgba(230, 162, 60, 0.12);
+}
+
+/* ProfileView「隐藏我的收藏」开关行文字 */
+html.dark .hide-favorites-row {
+  color: #c0c4cc;
+}
+
+/* 收藏夹页列表项边框：#f0f0f0 → 深灰 */
+html.dark .fav-item {
+  border-bottom-color: #2a2a2c;
+}
+
+/* 收藏夹页列表项顶部次要文字 */
+html.dark .fav-item-top {
+  color: #c0c4cc;
+}
+
+/* 收藏夹页标题主文字 */
+html.dark .fav-title {
+  color: #e5e6eb;
+}
+
+/* 收藏夹页空态文字 */
+html.dark .fav-empty {
+  color: #8c8c90;
+}

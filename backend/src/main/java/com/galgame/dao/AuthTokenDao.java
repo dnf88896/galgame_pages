@@ -38,4 +38,9 @@ public class AuthTokenDao {
     public void deleteByTokenHash(String tokenHash) {
         jdbcTemplate.update("DELETE FROM auth_tokens WHERE token_hash = ?", tokenHash);
     }
+
+    /** 删除某用户的全部 token（修改密码后让所有旧会话失效） */
+    public void deleteByUser(Long userId) {
+        jdbcTemplate.update("DELETE FROM auth_tokens WHERE user_id = ?", userId);
+    }
 }

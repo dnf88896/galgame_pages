@@ -22,7 +22,16 @@
           <el-avatar v-if="profile.avatar_url" :src="avatarSrc" :size="64" />
           <el-avatar v-else :size="64" class="avatar-text">{{ firstChar }}</el-avatar>
           <div class="profile-info">
-            <div class="profile-name">{{ profile.username }}</div>
+            <div class="profile-name">
+              {{ profile.username }}
+              <el-tag v-if="isBannedProfile" size="small" type="danger" style="margin-left: 8px">该用户已被封禁</el-tag>
+              <el-tag
+                v-if="Number(profile.admin_level) > 0"
+                size="small"
+                type="danger"
+                class="admin-tag"
+              >管理员 Lv.{{ profile.admin_level }}</el-tag>
+            </div>
             <div class="profile-meta">注册于 {{ formatTime(profile.created_at) }}</div>
             <div v-if="profile.bio" class="profile-bio">{{ profile.bio }}</div>
             <div v-else class="profile-bio muted">这个人很懒，还没有写签名。</div>
@@ -31,6 +40,7 @@
 
         <!-- 非本人资料页：关注 / 私聊 / 屏蔽 操作按钮 -->
         <div v-if="!isSelf" class="profile-actions">
+          <el-button v-if="isAdmin && isBannedProfile" size="small" type="warning" @click="unbanUser">解封</el-button>
           <el-button
             size="small"
             :type="profile.is_following ? 'default' : 'primary'"
@@ -73,6 +83,15 @@
             <span class="stat-value">{{ profile.follower_count ?? 0 }}</span>
             <span class="stat-label">粉丝</span>
           </router-link>
+          <!-- 收藏入口：他人隐藏收藏时不展示，自己的资料页始终展示 -->
+          <router-link
+            v-if="isSelf || !Number(profile.hide_favorites)"
+            :to="`/user/${userId}/favorites`"
+            class="stat stat-link"
+          >
+            <span class="stat-value">{{ profile.favorite_count ?? 0 }}</span>
+            <span class="stat-label">收藏</span>
+          </router-link>
         </div>
 
         <!-- 自己的资料页：编辑签名 / 更换头像 -->
@@ -97,9 +116,45 @@
               <input type="file" accept="image/*" @change="onAvatarChange" />
               <span v-if="avatarUploading" class="form-status">上传中...</span>
             </div>
+            <div class="hide-favorites-row">
+              <span class="hide-favorites-label">隐藏我的收藏</span>
+              <el-switch
+                v-model="hideFavorites"
+                :active-value="1"
+                :inactive-value="0"
+                @change="onHideFavoritesChange"
+              />
+            </div>
+            <div class="password-row">
+              <el-button size="small" @click="openPasswordDialog">修改密码</el-button>
+            </div>
           </div>
         </template>
       </el-card>
+
+      <el-dialog
+        v-model="passwordDialogVisible"
+        title="修改密码"
+        width="420px"
+        :close-on-click-modal="false"
+        @closed="resetPasswordForm"
+      >
+        <el-form label-width="80px" @submit.prevent>
+          <el-form-item label="旧密码">
+            <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="请输入当前密码" />
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少 6 位" maxlength="72" />
+          </el-form-item>
+          <el-form-item label="确认新密码">
+            <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" maxlength="72" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="passwordDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="passwordChanging" @click="changePassword">确认修改</el-button>
+        </template>
+      </el-dialog>
 
       <!-- 预留：后续可在此扩展更多用户板块（如 TA 的回复、收藏等） -->
       <el-card class="posts-card" style="margin-top: 16px">
@@ -123,7 +178,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
-import { user, setUser, requireLogin } from '../store/user'
+import { user, setUser, requireLogin, clearToken } from '../store/user'
 import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
 
 const route = useRoute()
@@ -136,6 +191,8 @@ const notFound = ref(false)
 const loadError = ref('')
 
 const bioDraft = ref('')
+// 隐藏收藏开关（1=隐藏，0=公开），初始值取登录用户信息里的 hide_favorites
+const hideFavorites = ref(Number(user.value?.hide_favorites) === 1 ? 1 : 0)
 const bioSaving = ref(false)
 const editStatus = ref('')
 const editStatusError = ref(false)
@@ -143,9 +200,20 @@ const avatarUploading = ref(false)
 const followingLoading = ref(false)
 const blockLoading = ref(false)
 
+const passwordDialogVisible = ref(false)
+const passwordChanging = ref(false)
+const pwdForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
 const isSelf = computed(() => !!user.value && Number(user.value.id) === Number(userId.value))
 const avatarSrc = computed(() => resolveAssetUrl(profile.value?.avatar_url))
 const firstChar = computed(() => (profile.value?.username || '?').slice(0, 1).toUpperCase())
+const isAdmin = computed(() => !!user.value && Number(user.value.admin_level) > 0)
+const isBannedProfile = computed(() => {
+  const until = profile.value?.ban_until
+  if (!until) return false
+  const t = new Date(until).getTime()
+  return !isNaN(t) && t > Date.now()
+})
 
 async function load() {
   const id = userId.value
@@ -160,7 +228,10 @@ async function load() {
   try {
     const { data } = await api.get(`/users/${id}`)
     profile.value = data
-    if (isSelf.value) bioDraft.value = data.bio || ''
+    if (isSelf.value) {
+      bioDraft.value = data.bio || ''
+      hideFavorites.value = Number(data.hide_favorites) === 1 ? 1 : 0
+    }
   } catch (e) {
     if (e.response?.status === 404) {
       notFound.value = true
@@ -179,15 +250,44 @@ async function saveBio() {
   editStatus.value = ''
   editStatusError.value = false
   try {
-    const { data } = await api.put('/auth/profile', { bio: bioDraft.value.trim() })
+    // 注意：PUT /auth/profile 会整体覆盖 bio，必须把当前 hide_favorites 一并带上，避免互相覆盖
+    const { data } = await api.put('/auth/profile', {
+      bio: bioDraft.value.trim(),
+      hide_favorites: hideFavorites.value === 1 ? 'true' : 'false',
+    })
     ElMessage.success('签名已保存')
     profile.value.bio = data.bio
-    if (user.value) setUser({ ...user.value, bio: data.bio })
+    hideFavorites.value = Number(data.hide_favorites) === 1 ? 1 : 0
+    if (user.value) {
+      setUser({ ...user.value, bio: data.bio, hide_favorites: hideFavorites.value })
+    }
   } catch (e) {
     editStatus.value = getErrorMessage(e, '保存失败')
     editStatusError.value = true
   } finally {
     bioSaving.value = false
+  }
+}
+
+// 隐藏收藏开关变更：同样带上当前 bioDraft，避免覆盖签名
+async function onHideFavoritesChange(val) {
+  // val 是切换后的新值（1/0），旧值即另一档
+  const old = val === 1 ? 0 : 1
+  try {
+    const { data } = await api.put('/auth/profile', {
+      bio: bioDraft.value.trim(),
+      hide_favorites: val === 1 ? 'true' : 'false',
+    })
+    ElMessage.success('已更新')
+    hideFavorites.value = Number(data.hide_favorites) === 1 ? 1 : 0
+    profile.value.hide_favorites = hideFavorites.value
+    if (user.value) {
+      setUser({ ...user.value, hide_favorites: hideFavorites.value })
+    }
+  } catch (e) {
+    // 失败回滚开关状态
+    hideFavorites.value = old
+    ElMessage.error(getErrorMessage(e, '更新失败'))
   }
 }
 
@@ -250,6 +350,57 @@ async function blockUser() {
   }
 }
 
+// 管理员解封（仅管理员且该用户被封禁时按钮可见）
+async function unbanUser() {
+  try {
+    await api.post(`/users/${userId.value}/unban`)
+    ElMessage.success('已解封')
+    load()   // 重新加载主页信息
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '解封失败'))
+  }
+}
+
+function openPasswordDialog() {
+  if (!requireLogin(router)) return
+  passwordDialogVisible.value = true
+}
+
+function resetPasswordForm() {
+  pwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+}
+
+async function changePassword() {
+  const { oldPassword, newPassword, confirmPassword } = pwdForm.value
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    ElMessage.warning('请填写完整。')
+    return
+  }
+  if (newPassword.length < 6) {
+    ElMessage.warning('新密码至少 6 位。')
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    ElMessage.warning('两次输入的新密码不一致。')
+    return
+  }
+  passwordChanging.value = true
+  try {
+    await api.put('/auth/password', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    })
+    passwordDialogVisible.value = false
+    ElMessage.success('密码已修改，请重新登录')
+    clearToken()
+    router.push('/login')
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '修改失败'))
+  } finally {
+    passwordChanging.value = false
+  }
+}
+
 watch(
   () => route.params.id,
   () => {
@@ -285,6 +436,10 @@ onMounted(() => load())
   font-size: 20px;
   font-weight: 600;
   color: #303133;
+}
+.admin-tag {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 .profile-meta {
   font-size: 13px;
@@ -368,6 +523,17 @@ onMounted(() => load())
   gap: 8px;
   font-size: 14px;
   color: #606266;
+}
+.hide-favorites-row {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #606266;
+}
+.password-row {
+  margin-top: 16px;
 }
 .recent-empty {
   color: #909399;

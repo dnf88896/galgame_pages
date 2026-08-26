@@ -21,7 +21,7 @@ import com.galgame.model.Notification;
 public class NotificationDao {
 
     private static final String BASE_COLUMNS =
-            "id, user_id, type, actor_id, post_id, reply_id, title, content, is_read, created_at";
+            "id, user_id, type, actor_id, post_id, reply_id, title, content, is_read, created_at, media";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -36,17 +36,24 @@ public class NotificationDao {
                     rs.getString("title"),
                     rs.getString("content"),
                     rs.getBoolean("is_read"),
-                    rs.getTimestamp("created_at").toLocalDateTime());
+                    rs.getTimestamp("created_at").toLocalDateTime(),
+                    rs.getString("media"));
 
     public NotificationDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 新增通知，返回数据库生成的自增 id */
+    /** 新增通知（无媒体），返回数据库生成的自增 id */
     public Long insert(long userId, String type, Long actorId, Long postId, Long replyId,
                        String title, String content) {
-        String sql = "INSERT INTO notifications (user_id, type, actor_id, post_id, reply_id, title, content) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        return insert(userId, type, actorId, postId, replyId, title, content, null);
+    }
+
+    /** 新增通知（含媒体 JSON），返回数据库生成的自增 id */
+    public Long insert(long userId, String type, Long actorId, Long postId, Long replyId,
+                       String title, String content, String media) {
+        String sql = "INSERT INTO notifications (user_id, type, actor_id, post_id, reply_id, title, content, media) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
@@ -57,6 +64,7 @@ public class NotificationDao {
             setNullableLong(ps, 5, replyId);
             setNullableString(ps, 6, title);
             setNullableString(ps, 7, content);
+            setNullableString(ps, 8, media);
             return ps;
         }, keyHolder);
         return keyHolder.getKey().longValue();
