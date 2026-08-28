@@ -1,6 +1,6 @@
 <template>
   <div class="page admin-reports-page">
-    <el-page-header content="举报受理" @back="$router.push('/')" />
+    <el-page-header content="举报受理" @back="() => goBack(router)" />
 
     <el-card v-if="loading" style="margin-top: 16px">
       <el-skeleton :rows="6" animated />
@@ -92,6 +92,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { goBack } from '../utils/navigation'
 import { formatTime, getErrorMessage } from '../utils/format'
 
 const router = useRouter()

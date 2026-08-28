@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -31,8 +32,15 @@ import com.galgame.model.RecentPost;
 @Repository
 public class PostDao {
 
+    /**
+     * 基础列：author 实时取用户昵称（COALESCE(u.nickname, posts.author)），匿名帖（user_id 为 NULL）
+     * 或用户已删除时回退快照列 author。所有查询必须 LEFT JOIN users u（见各方法 SQL）。
+     */
     private static final String BASE_COLUMNS =
-            "id, user_id, author, category, title, content, created_at, reply_count, view_count, like_count";
+            "posts.id, posts.user_id, COALESCE(u.nickname, posts.author) AS author, "
+                    + "posts.category, posts.title, posts.content, posts.created_at, "
+                    + "posts.reply_count, posts.view_count, posts.like_count, "
+                    + "posts.dislike_count, posts.cover_image, posts.pinned_until";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -48,11 +56,15 @@ public class PostDao {
                     rs.getTimestamp("created_at").toLocalDateTime(),
                     rs.getInt("reply_count"),
                     rs.getInt("view_count"),
-                    rs.getInt("like_count"));
+                    rs.getInt("like_count"),
+                    rs.getInt("dislike_count"),
+                    nullableString(rs, "cover_image"),
+                    nullableLocalDateTime(rs, "pinned_until"));
 
     private static final RowMapper<RecentPost> RECENT_POST_MAPPER = (ResultSet rs, int rowNum) ->
             new RecentPost(rs.getLong("id"), rs.getString("title"),
-                    rs.getTimestamp("created_at").toLocalDateTime());
+                    rs.getTimestamp("created_at").toLocalDateTime(),
+                    nullableLocalDateTime(rs, "pinned_until"));
 
     public PostDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -73,16 +85,17 @@ public class PostDao {
         if (followingOnly && currentUserId == null) {
             return List.of();
         }
-        StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM posts");
+        StringBuilder sql = new StringBuilder(
+                "SELECT " + BASE_COLUMNS + " FROM posts LEFT JOIN users u ON u.id = posts.user_id");
         List<String> where = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         if (followingOnly) {
-            where.add("user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)");
+            where.add("posts.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)");
             args.add(currentUserId);
         }
         if (filter != null) {
             if (filter.category() != null) {
-                where.add("category = ?");
+                where.add("posts.category = ?");
                 args.add(filter.category());
             }
             if (filter.sections() != null) {
@@ -92,7 +105,8 @@ public class PostDao {
                 }
             }
             if (filter.q() != null) {
-                where.add("(title LIKE ? OR content LIKE ? OR author LIKE ? OR category LIKE ?)");
+                where.add("(posts.title LIKE ? OR posts.content LIKE ? "
+                        + "OR COALESCE(u.nickname, posts.author) LIKE ? OR posts.category LIKE ?)");
                 String like = "%" + filter.q() + "%";
                 args.add(like);
                 args.add(like);
@@ -101,7 +115,7 @@ public class PostDao {
             }
         }
         if (hiddenAuthorIds != null && !hiddenAuthorIds.isEmpty()) {
-            StringBuilder cond = new StringBuilder("(user_id IS NULL OR user_id NOT IN (");
+            StringBuilder cond = new StringBuilder("(posts.user_id IS NULL OR posts.user_id NOT IN (");
             List<Long> ids = new ArrayList<>(hiddenAuthorIds);
             for (int i = 0; i < ids.size(); i++) {
                 if (i > 0) {
@@ -122,15 +136,18 @@ public class PostDao {
         return posts;
     }
 
-    /** 按排序值生成 ORDER BY 子句（含前置空格）；未知值回退时间倒序 */
+    /** 按排序值生成 ORDER BY 子句（含前置空格）；置顶（未过期）始终排最前；未知值回退时间倒序 */
     private static String orderBy(String sort) {
+        String pinnedPrefix = "(posts.pinned_until IS NOT NULL AND posts.pinned_until > NOW()) DESC, ";
         if ("likes".equals(sort)) {
-            return " ORDER BY like_count DESC, created_at DESC, id DESC";
+            return " ORDER BY " + pinnedPrefix + "posts.like_count DESC, posts.created_at DESC, posts.id DESC";
         }
         if ("hot".equals(sort)) {
-            return " ORDER BY (view_count + reply_count * 3 + like_count * 5) DESC, created_at DESC, id DESC";
+            return " ORDER BY " + pinnedPrefix
+                    + "(posts.view_count + posts.reply_count * 3 + posts.like_count * 5) DESC, "
+                    + "posts.created_at DESC, posts.id DESC";
         }
-        return " ORDER BY created_at DESC, id DESC";
+        return " ORDER BY " + pinnedPrefix + "posts.created_at DESC, posts.id DESC";
     }
 
     /** 各分区帖子数，返回 [{name, count}]，供首页左侧分区栏展示 */
@@ -142,7 +159,9 @@ public class PostDao {
 
     public Optional<Post> findById(Long id) {
         List<Post> rows = new ArrayList<>(jdbcTemplate.query(
-                "SELECT " + BASE_COLUMNS + " FROM posts WHERE id = ?", POST_ROW_MAPPER, id));
+                "SELECT " + BASE_COLUMNS + " FROM posts LEFT JOIN users u ON u.id = posts.user_id "
+                        + "WHERE posts.id = ?",
+                POST_ROW_MAPPER, id));
         if (rows.isEmpty()) {
             return Optional.empty();
         }
@@ -183,6 +202,16 @@ public class PostDao {
         Long postId = keyHolder.getKey().longValue();
         insertTags(postId, tags);
         return postId;
+    }
+
+    /** 写入帖子封面图 URL（发帖保存封面后回填 cover_image 列） */
+    public void updateCoverImage(Long postId, String coverImage) {
+        jdbcTemplate.update("UPDATE posts SET cover_image = ? WHERE id = ?", coverImage, postId);
+    }
+
+    /** 设置帖子置顶截止时间（管理员）：until 为 null 即取消置顶 */
+    public void setPinnedUntil(Long postId, LocalDateTime until) {
+        jdbcTemplate.update("UPDATE posts SET pinned_until = ? WHERE id = ?", until, postId);
     }
 
     /** 批量写入帖子标签：过滤 null / 空字符串；tags 为空则跳过 */
@@ -257,6 +286,43 @@ public class PostDao {
                 "SELECT COUNT(*) FROM post_likes WHERE post_id = ? AND user_id = ?",
                 Integer.class, postId, userId);
         return count != null && count > 0;
+    }
+
+    /** 判断某用户是否踩过该帖子（与点赞独立，可同时赞和踩） */
+    public boolean isDisliked(Long postId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_dislikes WHERE post_id = ? AND user_id = ?",
+                Integer.class, postId, userId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 帖子点踩 toggle。已踩则取消，未踩则点踩，并同步 posts.dislike_count。
+     * 与点赞完全独立（不互斥）；整个操作在一个事务里；帖子不存在时返回 empty。
+     * 返回值复用 LikeResult（liked 槽存「是否已踩」，likeCount 槽存「踩数」）。
+     */
+    @Transactional
+    public Optional<LikeResult> toggleDislike(Long postId, Long userId) {
+        if (!existsById(postId)) {
+            return Optional.empty();
+        }
+        boolean disliked;
+        if (isDisliked(postId, userId)) {
+            jdbcTemplate.update(
+                    "DELETE FROM post_dislikes WHERE post_id = ? AND user_id = ?", postId, userId);
+            jdbcTemplate.update(
+                    "UPDATE posts SET dislike_count = GREATEST(0, dislike_count - 1) WHERE id = ?", postId);
+            disliked = false;
+        } else {
+            jdbcTemplate.update(
+                    "INSERT INTO post_dislikes (post_id, user_id) VALUES (?, ?)", postId, userId);
+            jdbcTemplate.update(
+                    "UPDATE posts SET dislike_count = dislike_count + 1 WHERE id = ?", postId);
+            disliked = true;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT dislike_count FROM posts WHERE id = ?", Integer.class, postId);
+        return Optional.of(new LikeResult(disliked, count == null ? 0 : count));
     }
 
     /** 判断某用户是否收藏过该帖子 */
@@ -362,10 +428,13 @@ public class PostDao {
      * 为避免歧义，基础列显式加了 p. 前缀（结果集列名不受影响，POST_ROW_MAPPER 仍按列名取值）。
      */
     public List<Post> findFavoritesByUser(Long userId) {
-        String sql = "SELECT p.id, p.user_id, p.author, p.category, p.title, p.content, "
-                + "p.created_at, p.reply_count, p.view_count, p.like_count "
+        String sql = "SELECT p.id, p.user_id, COALESCE(u.nickname, p.author) AS author, "
+                + "p.category, p.title, p.content, p.created_at, p.reply_count, p.view_count, p.like_count, "
+                + "p.dislike_count, p.cover_image, p.pinned_until "
                 + "FROM post_favorites pf JOIN posts p ON p.id = pf.post_id "
-                + "WHERE pf.user_id = ? ORDER BY pf.created_at DESC, p.id DESC";
+                + "LEFT JOIN users u ON u.id = p.user_id "
+                + "WHERE pf.user_id = ? "
+                + "ORDER BY (p.pinned_until IS NOT NULL AND p.pinned_until > NOW()) DESC, pf.created_at DESC, p.id DESC";
         List<Post> posts = new ArrayList<>(jdbcTemplate.query(sql, POST_ROW_MAPPER, userId));
         attachTags(posts);
         return posts;
@@ -374,7 +443,7 @@ public class PostDao {
     /** 该用户最新发布的 N 条帖子 */
     public List<RecentPost> findRecentPostsByUser(Long userId, int limit) {
         return jdbcTemplate.query(
-                "SELECT id, title, created_at FROM posts WHERE user_id = ? "
+                "SELECT id, title, created_at, pinned_until FROM posts WHERE user_id = ? "
                         + "ORDER BY created_at DESC, id DESC LIMIT ?",
                 RECENT_POST_MAPPER, userId, limit);
     }
@@ -382,5 +451,15 @@ public class PostDao {
     private static Long nullableLong(ResultSet rs, String column) throws SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private static String nullableString(ResultSet rs, String column) throws SQLException {
+        String value = rs.getString(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static LocalDateTime nullableLocalDateTime(ResultSet rs, String column) throws SQLException {
+        java.sql.Timestamp t = rs.getTimestamp(column);
+        return t == null ? null : t.toLocalDateTime();
     }
 }

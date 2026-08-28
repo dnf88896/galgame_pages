@@ -1,6 +1,6 @@
 <template>
   <div class="page profile-page">
-    <el-page-header content="个人主页" @back="$router.push('/')" />
+    <el-page-header content="个人主页" @back="() => goBack(router)" />
 
     <el-card v-if="loading && !profile" style="margin-top: 16px">
       <el-skeleton :rows="6" animated />
@@ -23,7 +23,8 @@
           <el-avatar v-else :size="64" class="avatar-text">{{ firstChar }}</el-avatar>
           <div class="profile-info">
             <div class="profile-name">
-              {{ profile.username }}
+              {{ profile.nickname || profile.username }}
+              <span class="profile-username">@{{ profile.username }}</span>
               <el-tag v-if="isBannedProfile" size="small" type="danger" style="margin-left: 8px">该用户已被封禁</el-tag>
               <el-tag
                 v-if="Number(profile.admin_level) > 0"
@@ -35,6 +36,19 @@
             <div class="profile-meta">注册于 {{ formatTime(profile.created_at) }}</div>
             <div v-if="profile.bio" class="profile-bio">{{ profile.bio }}</div>
             <div v-else class="profile-bio muted">这个人很懒，还没有写签名。</div>
+          </div>
+          <!-- 萌点（积分）展示：资料卡右上角；签到按钮仅本人可见 -->
+          <div class="moe-box">
+            <div class="moe-title">✦ 萌点</div>
+            <div class="moe-value">{{ profile.moe_points ?? 0 }}</div>
+            <el-button
+              v-if="isSelf"
+              size="small"
+              type="primary"
+              :disabled="todayCheckedIn || checkingIn"
+              :loading="checkingIn"
+              @click="checkIn"
+            >{{ todayCheckedIn ? '今日已签到' : '签到 +10' }}</el-button>
           </div>
         </div>
 
@@ -99,6 +113,17 @@
           <el-divider />
           <div class="edit-section">
             <div class="edit-title">编辑资料</div>
+            <div class="nickname-row">
+              <span class="nickname-label">昵称：</span>
+              <el-input
+                v-model="nicknameDraft"
+                maxlength="32"
+                show-word-limit
+                placeholder="帖子和评论上显示的名字（可随时修改）"
+                style="max-width: 320px"
+              />
+              <el-button type="primary" :loading="nicknameSaving" @click="saveNickname">保存昵称</el-button>
+            </div>
             <el-input
               v-model="bioDraft"
               type="textarea"
@@ -165,6 +190,7 @@
         <div v-else class="recent-list">
           <div v-for="p in profile.recent_posts" :key="p.id" class="recent-item">
             <span class="recent-title" @click="goPost(p.id)">{{ p.title }}</span>
+            <span v-if="isPinned(p)" class="pinned-badge">置顶</span>
             <span class="recent-time">{{ formatTime(p.created_at) }}</span>
           </div>
         </div>
@@ -178,8 +204,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { goBack } from '../utils/navigation'
 import { user, setUser, requireLogin, clearToken } from '../store/user'
-import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
+import { formatTime, resolveAssetUrl, getErrorMessage, isPinned } from '../utils/format'
+import { refreshMoe } from '../utils/moeGain'
 
 const route = useRoute()
 const router = useRouter()
@@ -191,6 +219,8 @@ const notFound = ref(false)
 const loadError = ref('')
 
 const bioDraft = ref('')
+const nicknameDraft = ref('')
+const nicknameSaving = ref(false)
 // 隐藏收藏开关（1=隐藏，0=公开），初始值取登录用户信息里的 hide_favorites
 const hideFavorites = ref(Number(user.value?.hide_favorites) === 1 ? 1 : 0)
 const bioSaving = ref(false)
@@ -199,6 +229,9 @@ const editStatusError = ref(false)
 const avatarUploading = ref(false)
 const followingLoading = ref(false)
 const blockLoading = ref(false)
+// 萌点签到：今日是否已签 + 签到请求中
+const todayCheckedIn = ref(false)
+const checkingIn = ref(false)
 
 const passwordDialogVisible = ref(false)
 const passwordChanging = ref(false)
@@ -206,7 +239,7 @@ const pwdForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 const isSelf = computed(() => !!user.value && Number(user.value.id) === Number(userId.value))
 const avatarSrc = computed(() => resolveAssetUrl(profile.value?.avatar_url))
-const firstChar = computed(() => (profile.value?.username || '?').slice(0, 1).toUpperCase())
+const firstChar = computed(() => (profile.value?.nickname || profile.value?.username || '?').slice(0, 1).toUpperCase())
 const isAdmin = computed(() => !!user.value && Number(user.value.admin_level) > 0)
 const isBannedProfile = computed(() => {
   const until = profile.value?.ban_until
@@ -230,7 +263,9 @@ async function load() {
     profile.value = data
     if (isSelf.value) {
       bioDraft.value = data.bio || ''
+      nicknameDraft.value = data.nickname || data.username || ''
       hideFavorites.value = Number(data.hide_favorites) === 1 ? 1 : 0
+      await loadCheckInStatus()
     }
   } catch (e) {
     if (e.response?.status === 404) {
@@ -241,6 +276,66 @@ async function load() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+// 拉取本人今日签到状态（仅本人资料页调用；失败不影响资料展示）
+async function loadCheckInStatus() {
+  try {
+    const { data } = await api.get('/check-in/status')
+    todayCheckedIn.value = !!data.today_checked_in
+    if (profile.value) profile.value.moe_points = data.moe_points
+  } catch (e) {
+    // 签到状态加载失败不阻断资料页
+  }
+}
+
+// 每日签到：首次 +10 萌点；已签过提示
+async function checkIn() {
+  if (!requireLogin(router)) return
+  if (checkingIn.value) return
+  checkingIn.value = true
+  try {
+    const { data } = await api.post('/check-in')
+    todayCheckedIn.value = true
+    if (data.awarded) {
+      ElMessage.success('签到成功，获得 10 萌点！')
+      if (profile.value) profile.value.moe_points = data.moe_points
+      // refreshMoe 检测增量弹「+n萌点」并同步 store/基线
+      await refreshMoe(data.moe_points)
+    } else {
+      ElMessage.info('今天已经签到过啦。')
+    }
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '签到失败'))
+  } finally {
+    checkingIn.value = false
+  }
+}
+
+async function saveNickname() {
+  if (!isSelf.value) return
+  const nickname = nicknameDraft.value.trim()
+  if (!nickname) {
+    ElMessage.warning('昵称不能为空。')
+    return
+  }
+  nicknameSaving.value = true
+  try {
+    const { data } = await api.put('/auth/profile', {
+      nickname,
+      bio: bioDraft.value.trim(),
+      hide_favorites: hideFavorites.value === 1 ? 'true' : 'false',
+    })
+    ElMessage.success('昵称已保存')
+    profile.value.nickname = data.nickname
+    if (user.value) {
+      setUser({ ...user.value, nickname: data.nickname })
+    }
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '保存失败'))
+  } finally {
+    nicknameSaving.value = false
   }
 }
 
@@ -429,6 +524,30 @@ onMounted(() => load())
   font-size: 28px;
   font-weight: 600;
 }
+.moe-box {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+}
+.moe-title {
+  font-size: 12px;
+  color: #909399;
+}
+.moe-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #e6a23c;
+  line-height: 1;
+}
+.moe-box .el-button {
+  margin-left: 0;
+}
 .profile-info {
   min-width: 0;
 }
@@ -436,6 +555,12 @@ onMounted(() => load())
   font-size: 20px;
   font-weight: 600;
   color: #303133;
+}
+.profile-username {
+  font-size: 13px;
+  color: #909399;
+  margin-left: 6px;
+  font-weight: 400;
 }
 .admin-tag {
   margin-left: 8px;
@@ -509,6 +634,17 @@ onMounted(() => load())
   gap: 12px;
   margin-top: 12px;
 }
+.nickname-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: #606266;
+}
+.nickname-label {
+  flex-shrink: 0;
+}
 .form-status {
   font-size: 13px;
   color: #67c23a;
@@ -570,5 +706,15 @@ onMounted(() => load())
   color: #999;
   font-size: 12px;
   white-space: nowrap;
+}
+/* 置顶帖子标签 */
+.pinned-badge {
+  font-size: 11px;
+  color: #fff;
+  background: #e6a23c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.4;
+  flex-shrink: 0;
 }
 </style>

@@ -77,6 +77,11 @@ export async function fetchTagStructure() {
   }
 }
 
+// 判断帖子是否处于置顶中：pinned_until 存在且晚于当前时间（过期自动不显示置顶）
+export function isPinned(p) {
+  return !!(p && p.pinned_until && new Date(p.pinned_until).getTime() > Date.now())
+}
+
 // 根据大类 key 在标签结构中查找中文 label，查不到返回 ''
 export function categoryLabel(categories, key) {
   if (!Array.isArray(categories) || !key) return ''

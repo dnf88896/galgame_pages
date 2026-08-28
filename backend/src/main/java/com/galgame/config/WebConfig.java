@@ -1,5 +1,6 @@
 package com.galgame.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -16,19 +17,24 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
 
+    /** CORS 允许来源，逗号分隔；默认 * 全放行（与线上一致），可改回白名单收紧 */
+    @Value("${app.cors.allowed-origins:*}")
+    private String corsAllowedOrigins;
+
     public WebConfig(AuthInterceptor authInterceptor) {
         this.authInterceptor = authInterceptor;
     }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        String[] origins = corsAllowedOrigins.split(",");
         registry.addMapping("/api/**")
-                .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                .allowedOrigins(origins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*");
         // 附件也需要被前端（如 canvas 读图）跨域访问
         registry.addMapping("/uploads/**")
-                .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                .allowedOrigins(origins)
                 .allowedMethods("GET", "OPTIONS")
                 .allowedHeaders("*");
     }
@@ -54,13 +60,17 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/posts",
                         "/api/posts/*/replies",
                         "/api/posts/*/like",
+                        "/api/posts/*/dislike",
                         "/api/posts/*/favorite",
                         "/api/replies/*/like",
+                        "/api/replies/*/dislike",
                         "/api/replies/*",
                         "/api/notifications/**",
                         "/api/announcements",
                         "/api/posts/*/category",
+                        "/api/posts/*/pin",
                         "/api/posts/*/report",
+                        "/api/replies/*/pin",
                         "/api/replies/*/report",
                         "/api/reports/**",
                         "/api/users/*/unban");

@@ -85,6 +85,7 @@ public class FollowController {
                     Map<String, Object> m = new HashMap<>();
                     m.put("id", u.id());
                     m.put("username", u.username());
+                    m.put("nickname", u.nickname());
                     m.put("avatar_url", u.avatarUrl());
                     m.put("bio", u.bio());
                     m.put("is_following", currentUserId.isPresent()

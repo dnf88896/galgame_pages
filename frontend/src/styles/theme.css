@@ -113,6 +113,11 @@ html.dark .profile-stats .stat {
   background: #2a2a2c;
 }
 
+/* 萌点卡片（资料页右上角）：浅色卡片 → 深灰 */
+html.dark .moe-box {
+  background: #2a2a2c;
+}
+
 
 /* ---- 5.2 边框：#e4e7ed / #dcdfe6 / #ebeef5 → 深灰 ---- */
 html.dark .nav-bar,
@@ -473,4 +478,108 @@ html.dark .fav-title {
 /* 收藏夹页空态文字 */
 html.dark .fav-empty {
   color: #8c8c90;
+}
+
+
+/* ---- 5.13 帖子投票区（PostPoll / PollItem 深色覆盖） ---- */
+/* 投票区卡片：白底 → 深灰 */
+html.dark .poll-card {
+  background: #1d1e1f;
+}
+
+/* 卡片边框：#e4e7ed → 深灰 */
+html.dark .poll-card {
+  border-color: #3a3a3c;
+}
+
+/* 卡片投影：过亮的浅色投影 → 深色投影 */
+html.dark .poll-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 投票标题主文字 */
+html.dark .poll-title {
+  color: #e5e6eb;
+}
+
+/* 投票描述（#666 → 提亮） */
+html.dark .poll-desc {
+  color: #c0c4cc;
+}
+
+/* 投票间分隔线：#f0f0f0 → 深灰 */
+html.dark .poll-item + .poll-item {
+  border-top-color: #2a2a2c;
+}
+
+/* 状态 chip：浅灰底 → 深灰底 */
+html.dark .poll-chip {
+  background: #2a2a2c;
+  color: #8c8c90;
+}
+
+/* 选项行：白底 → 深灰，边框 → 深灰 */
+html.dark .poll-option {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+}
+html.dark .poll-option:hover {
+  border-color: #409eff;
+}
+
+/* 已投选项高亮：浅蓝底 → 深蓝底 */
+html.dark .poll-option.is-voted {
+  background: #1f3a5f;
+  border-color: #409eff;
+}
+
+/* 选项文字主文字 */
+html.dark .option-text {
+  color: #e5e6eb;
+}
+
+/* 进度条轨道：浅灰 → 深灰 */
+html.dark .option-bar {
+  background: #2a2a2c;
+}
+
+/* 进度条票数文字 */
+html.dark .option-count {
+  color: #8c8c90;
+}
+
+/* 已投票提示文字 */
+html.dark .poll-voted-hint {
+  color: #8c8c90;
+}
+
+/* 投票区 header 标题 */
+html.dark .poll-section-title {
+  color: #e5e6eb;
+}
+
+/* @ 自动补全 (MentionTextarea) 深色 */
+html.dark .mention-input {
+  background: #232324;
+  border-color: #3a3a3d;
+  color: #e5e6eb;
+}
+html.dark .mention-word-count {
+  color: #6b6b6f;
+}
+html.dark .mention-list {
+  background: #2a2a2c;
+  border-color: #3a3a3d;
+}
+html.dark .mention-list li {
+  color: #e5e6eb;
+}
+html.dark .mention-list li.active {
+  background: #363638;
+}
+html.dark .mention-user {
+  color: #a8abb2;
+}
+html.dark .mention-none {
+  color: #909399;
 }

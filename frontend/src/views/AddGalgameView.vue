@@ -3,13 +3,13 @@
     <div class="add-center">
       <div class="add-head">
         <el-button link type="primary" @click="goBack">← 返回</el-button>
-        <h1 class="add-title">添加 Galgame</h1>
+        <h1 class="add-title">提交 Galgame 信息</h1>
       </div>
 
-      <!-- 权限守卫：非管理员只显示提示，不渲染表单 -->
-      <div v-if="!isAdmin" class="add-denied">
-        <p>需要管理员权限才能添加 Galgame。</p>
-        <el-button type="primary" @click="goBack">返回</el-button>
+      <!-- 权限守卫：未登录只显示提示，不渲染表单 -->
+      <div v-if="!loggedIn" class="add-denied">
+        <p>请先登录后提交 Galgame 信息。</p>
+        <el-button type="primary" @click="goLogin">去登录</el-button>
       </div>
 
       <div v-else class="add-card">
@@ -109,7 +109,7 @@
           </el-form-item>
 
           <el-form-item>
-            <el-button type="primary" :loading="submitting" @click="submit">提交</el-button>
+            <el-button type="primary" :loading="submitting" @click="submit">{{ isAdmin ? '提交' : '提交审核' }}</el-button>
           </el-form-item>
         </el-form>
       </div>
@@ -119,16 +119,24 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
+import { refreshMoe } from '../utils/moeGain'
 import { fetchTagStructure, getErrorMessage, resolveAssetUrl } from '../utils/format'
 
+const route = useRoute()
 const router = useRouter()
 
-// 管理员（admin_level > 0）才能添加 galgame；等级来自 store，认证后实时刷新
+// 登录用户（有 id）才能提交 galgame 信息；等级来自 store，认证后实时刷新
 const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
+const loggedIn = computed(() => !!user.value?.id)
+
+// 未登录：跳登录页，登录成功后回跳当前提交页
+function goLogin() {
+  router.push({ path: '/login', query: { redirect: route.fullPath } })
+}
 
 const form = reactive({
   name: '',
@@ -220,10 +228,16 @@ async function submit() {
   submitting.value = true
   try {
     await api.post('/galgames', payload)
-    ElMessage.success('添加成功')
+    if (isAdmin.value) {
+      ElMessage.success('添加成功')
+      // 管理员创建即上架 → 提交者（自己）+10 萌点；refreshMoe 通用检测提示并同步 store/基线
+      refreshMoe()
+    } else {
+      ElMessage.success('已提交，等待管理员审核')
+    }
     router.push('/galgame')
   } catch (e) {
-    ElMessage.error(getErrorMessage(e, '添加失败'))
+    ElMessage.error(getErrorMessage(e, '提交失败'))
   } finally {
     submitting.value = false
   }

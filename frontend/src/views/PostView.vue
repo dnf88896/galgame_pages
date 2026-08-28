@@ -1,6 +1,6 @@
 <template>
   <div class="page detail">
-    <el-page-header content="帖子详情" @back="$router.push('/')" />
+    <el-page-header content="帖子详情" @back="() => goBack(router)" />
 
     <div v-if="invalidId" class="status-box">
       <p class="note">缺少有效的帖子 ID。</p>
@@ -40,6 +40,12 @@
             <span class="time">{{ formatTime(post.created_at) }}</span>
           </div>
           <h2 class="post-title">{{ post.title }}</h2>
+          <img
+            v-if="post.cover_image"
+            :src="resolveAssetUrl(post.cover_image)"
+            class="post-cover"
+            alt="封面"
+          />
           <p class="content">{{ post.content }}</p>
           <AttachmentList :attachments="post.attachments" />
           <div class="post-actions">
@@ -51,6 +57,15 @@
               @click="togglePostLike"
             >
               {{ post.liked ? '♥' : '♡' }} {{ post.like_count }}
+            </button>
+            <button
+              class="like-button dislike"
+              :class="{ disliked: post.disliked }"
+              type="button"
+              :disabled="postDisliking"
+              @click="togglePostDislike"
+            >
+              {{ post.disliked ? '▼' : '▽' }} {{ post.dislike_count ?? 0 }}
             </button>
             <button
               class="favorite-button"
@@ -91,6 +106,8 @@
           </div>
         </el-card>
 
+        <PostPoll v-if="post" :post-id="post.id" :is-owner="isOwner" />
+
         <el-card class="replies-card" style="margin-top: 16px">
           <template #header>
             <span class="replies-title">
@@ -113,6 +130,7 @@
                 </span>
                 <span class="dot">·</span>
                 <span class="time">{{ formatTime(r.created_at) }}</span>
+                <span v-if="r.is_pinned" class="pinned-badge">置顶</span>
               </div>
               <div v-if="parentNameOf(r)" class="reply-parent">回复 @{{ parentNameOf(r) }}</div>
               <p class="reply-content">{{ r.content }}</p>
@@ -126,7 +144,23 @@
                 >
                   {{ r.liked ? '♥' : '♡' }} {{ r.like_count }}
                 </button>
+                <button
+                  class="like-button small dislike"
+                  :class="{ disliked: r.disliked }"
+                  type="button"
+                  :disabled="replyDisliking.has(r.id)"
+                  @click="toggleReplyDislike(r)"
+                >
+                  {{ r.disliked ? '▼' : '▽' }} {{ r.dislike_count ?? 0 }}
+                </button>
                 <el-button link size="small" @click="replyingTo = r">回复</el-button>
+                <el-button
+                  v-if="canPinReply(r)"
+                  link
+                  type="warning"
+                  size="small"
+                  @click="toggleReplyPin(r)"
+                >{{ r.is_pinned ? '取消置顶' : '置顶' }}</el-button>
                 <el-button
                   v-if="!(user && Number(r.user_id) === Number(user.id))"
                   link
@@ -161,15 +195,25 @@
                 <span class="replying-label">回复 @{{ replyingTo.author }}</span>
                 <el-button link size="small" @click="replyingTo = null">取消</el-button>
               </div>
-              <el-input
+              <MentionTextarea
                 v-model="replyForm.content"
-                type="textarea"
                 :rows="4"
-                maxlength="2000"
+                :maxlength="2000"
                 show-word-limit
                 placeholder="写下你的回复"
               />
+              <EmojiPicker
+                v-if="replyEmojiVisible"
+                class="reply-emoji-picker"
+                @pick="onReplyEmoji"
+              />
               <div class="reply-form-actions">
+                <el-button
+                  class="emoji-toggle"
+                  :class="{ active: replyEmojiVisible }"
+                  type="text"
+                  @click="replyEmojiVisible = !replyEmojiVisible"
+                >😀</el-button>
                 <el-button type="primary" :loading="replySubmitting" @click="submitReply">
                   发表回复
                 </el-button>
@@ -224,9 +268,14 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { goBack } from '../utils/navigation'
 import AttachmentList from '../components/AttachmentList.vue'
+import EmojiPicker from '../components/EmojiPicker.vue'
+import PostPoll from '../components/PostPoll.vue'
+import MentionTextarea from '../components/MentionTextarea.vue'
 import { token, user, requireLogin } from '../store/user'
-import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage, categories } from '../utils/format'
+import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage, resolveAssetUrl, categories } from '../utils/format'
+import { refreshMoe } from '../utils/moeGain'
 
 const route = useRoute()
 const router = useRouter()
@@ -295,8 +344,18 @@ async function saveCategory() {
 }
 
 const postLiking = ref(false)
+const postDisliking = ref(false)
 const postFavoriting = ref(false)
 const replyLiking = reactive(new Set())
+const replyDisliking = reactive(new Set())
+
+// 回复输入框 emoji 面板显隐
+const replyEmojiVisible = ref(false)
+
+// 点选 emoji 直接追加到回复正文末尾（面板保持展开，可连续插入）
+function onReplyEmoji(e) {
+  replyForm.content += e
+}
 
 const replyForm = reactive({ content: '' })
 const replySubmitting = ref(false)
@@ -353,6 +412,22 @@ async function togglePostLike() {
   }
 }
 
+// 帖子点踩（与点赞独立，不互斥）
+async function togglePostDislike() {
+  if (!requireLogin(router)) return
+  if (!post.value || postDisliking.value) return
+  postDisliking.value = true
+  try {
+    const { data } = await api.post(`/posts/${post.value.id}/dislike`)
+    post.value.disliked = data.disliked
+    post.value.dislike_count = data.dislike_count
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  } finally {
+    postDisliking.value = false
+  }
+}
+
 async function togglePostFavorite() {
   if (!requireLogin(router)) return
   if (!post.value || postFavoriting.value) return
@@ -380,6 +455,39 @@ async function toggleReplyLike(reply) {
     ElMessage.error(getErrorMessage(e, '点赞失败'))
   } finally {
     replyLiking.delete(reply.id)
+  }
+}
+
+// 回复点踩（与点赞独立，不互斥）
+async function toggleReplyDislike(reply) {
+  if (!requireLogin(router)) return
+  if (replyDisliking.has(reply.id)) return
+  replyDisliking.add(reply.id)
+  try {
+    const { data } = await api.post(`/replies/${reply.id}/dislike`)
+    reply.disliked = data.disliked
+    reply.dislike_count = data.dislike_count
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  } finally {
+    replyDisliking.delete(reply.id)
+  }
+}
+
+// 帖子楼主可置顶/取消置顶评论（楼主自己发的评论同样可置顶；管理员若非楼主无权）
+function canPinReply(r) {
+  if (!user.value) return false
+  return isOwner.value
+}
+
+// 置顶/取消置顶评论：调后端接口后局部刷新该评论的 is_pinned（后端已按置顶优先排序，重载时自动生效）
+async function toggleReplyPin(reply) {
+  try {
+    const { data } = await api.put(`/replies/${reply.id}/pin`, { pinned: !reply.is_pinned })
+    reply.is_pinned = data.pinned
+    ElMessage.success(data.pinned ? '评论已置顶' : '已取消评论置顶')
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
   }
 }
 
@@ -415,6 +523,8 @@ async function submitReply() {
     replyingTo.value = null
     replyStatus.value = ''
     ElMessage.success('回复已发表')
+    // 每日首次评论 +5 萌点：refreshMoe 检测增量弹「+n萌点」并同步（非首次不加分则不弹）
+    refreshMoe()
     await load({ silent: true })
   } catch (e) {
     const msg = getErrorMessage(e, '发表回复失败')
@@ -648,6 +758,15 @@ onMounted(() => {
   color: #333;
   font-weight: 500;
 }
+/* 置顶评论标签 */
+.pinned-badge {
+  font-size: 11px;
+  color: #fff;
+  background: #e6a23c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.4;
+}
 .reply-content {
   white-space: pre-wrap;
   line-height: 1.6;
@@ -706,5 +825,37 @@ onMounted(() => {
   margin-top: 32px;
   text-align: center;
   color: #909399;
+}
+/* 点踩按钮：灰色系与点赞的粉色区分 */
+.like-button.dislike:hover {
+  color: #909399;
+  border-color: #909399;
+}
+.like-button.dislike.disliked {
+  color: #909399;
+  border-color: #909399;
+  background: #f4f4f5;
+}
+/* 帖子封面图（详情页标题下方）：宽度撑满内容区，高度自适应，整图完整显示不裁剪 */
+.post-cover {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0 0 16px;
+  background: #f5f7fa;
+}
+/* 回复输入区 emoji 面板 */
+.reply-emoji-picker {
+  margin-top: 8px;
+}
+/* emoji 开关按钮 */
+.emoji-toggle {
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.emoji-toggle.active {
+  color: #409eff;
 }
 </style>

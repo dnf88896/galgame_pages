@@ -26,7 +26,18 @@ import com.galgame.model.Reply;
 @Repository
 public class ReplyDao {
 
-    private static final String BASE_COLUMNS = "id, post_id, user_id, author, content, created_at, like_count, parent_id, parent_author";
+    /**
+     * 基础列：author 实时取回复者昵称（COALESCE(u.nickname, replies.author)），匿名/用户已删除回退快照列；
+     * parent_author 实时取父回复作者昵称（父回复被删/匿名时回退快照列 parent_author）。
+     * 查询须 LEFT JOIN users u、replies pr、users pu（见各方法 SQL）。
+     */
+    private static final String BASE_COLUMNS =
+            "replies.id, replies.post_id, replies.user_id, "
+                    + "COALESCE(u.nickname, replies.author) AS author, "
+                    + "replies.content, replies.created_at, replies.like_count, replies.dislike_count, "
+                    + "replies.parent_id, "
+                    + "COALESCE(pu.nickname, replies.parent_author) AS parent_author, "
+                    + "replies.is_pinned";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -40,7 +51,9 @@ public class ReplyDao {
                     rs.getString("author"),
                     rs.getString("content"),
                     rs.getTimestamp("created_at").toLocalDateTime(),
-                    rs.getInt("like_count"));
+                    rs.getInt("like_count"),
+                    rs.getInt("dislike_count"),
+                    rs.getBoolean("is_pinned"));
 
     public ReplyDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -49,13 +62,24 @@ public class ReplyDao {
     /** 某帖子的全部回复，按时间升序 */
     public List<Reply> findByPostId(Long postId) {
         return jdbcTemplate.query(
-                "SELECT " + BASE_COLUMNS + " FROM replies WHERE post_id = ? ORDER BY created_at ASC, id ASC",
+                "SELECT " + BASE_COLUMNS
+                        + " FROM replies"
+                        + " LEFT JOIN users u ON u.id = replies.user_id"
+                        + " LEFT JOIN replies pr ON pr.id = replies.parent_id"
+                        + " LEFT JOIN users pu ON pu.id = pr.user_id"
+                        + " WHERE replies.post_id = ? ORDER BY replies.is_pinned DESC, replies.created_at ASC, replies.id ASC",
                 REPLY_ROW_MAPPER, postId);
     }
 
     public Optional<Reply> findById(Long id) {
         List<Reply> rows = jdbcTemplate.query(
-                "SELECT " + BASE_COLUMNS + " FROM replies WHERE id = ?", REPLY_ROW_MAPPER, id);
+                "SELECT " + BASE_COLUMNS
+                        + " FROM replies"
+                        + " LEFT JOIN users u ON u.id = replies.user_id"
+                        + " LEFT JOIN replies pr ON pr.id = replies.parent_id"
+                        + " LEFT JOIN users pu ON pu.id = pr.user_id"
+                        + " WHERE replies.id = ? ORDER BY replies.is_pinned DESC, replies.created_at ASC, replies.id ASC",
+                REPLY_ROW_MAPPER, id);
         return rows.stream().findFirst();
     }
 
@@ -63,6 +87,11 @@ public class ReplyDao {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM replies WHERE id = ?", Integer.class, id);
         return count != null && count > 0;
+    }
+
+    /** 设置评论置顶（发帖人/管理员）：无时间限制，pinned 为 false 即取消置顶 */
+    public void setPinned(Long replyId, boolean pinned) {
+        jdbcTemplate.update("UPDATE replies SET is_pinned = ? WHERE id = ?", pinned, replyId);
     }
 
     /** 新增回复，返回数据库生成的自增 id */
@@ -103,6 +132,53 @@ public class ReplyDao {
         String inClause = replyIds.stream().map(String::valueOf).collect(Collectors.joining(","));
         String sql = "SELECT reply_id FROM reply_likes WHERE reply_id IN (" + inClause + ") AND user_id = ?";
         return new HashSet<>(jdbcTemplate.query(sql, (rs, rowNum) -> rs.getLong("reply_id"), userId));
+    }
+
+    /** 批量查询某用户踩过哪些回复，返回回复 id 集合（防 N+1） */
+    public Set<Long> findDislikedReplyIds(List<Long> replyIds, Long userId) {
+        if (replyIds == null || replyIds.isEmpty()) {
+            return Set.of();
+        }
+        String inClause = replyIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+        String sql = "SELECT reply_id FROM reply_dislikes WHERE reply_id IN (" + inClause + ") AND user_id = ?";
+        return new HashSet<>(jdbcTemplate.query(sql, (rs, rowNum) -> rs.getLong("reply_id"), userId));
+    }
+
+    /** 判断某用户是否踩过该回复（与点赞独立，可同时赞和踩） */
+    public boolean isDisliked(Long replyId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM reply_dislikes WHERE reply_id = ? AND user_id = ?",
+                Integer.class, replyId, userId);
+        return count != null && count > 0;
+    }
+
+    /**
+     * 回复点踩 toggle。已踩则取消，未踩则点踩，并同步 replies.dislike_count。
+     * 与点赞完全独立（不互斥）；整个操作在一个事务里；回复不存在时返回 empty。
+     * 返回值复用 LikeResult（liked 槽存「是否已踩」，likeCount 槽存「踩数」）。
+     */
+    @Transactional
+    public Optional<LikeResult> toggleDislike(Long replyId, Long userId) {
+        if (!existsById(replyId)) {
+            return Optional.empty();
+        }
+        boolean disliked;
+        if (isDisliked(replyId, userId)) {
+            jdbcTemplate.update(
+                    "DELETE FROM reply_dislikes WHERE reply_id = ? AND user_id = ?", replyId, userId);
+            jdbcTemplate.update(
+                    "UPDATE replies SET dislike_count = GREATEST(0, dislike_count - 1) WHERE id = ?", replyId);
+            disliked = false;
+        } else {
+            jdbcTemplate.update(
+                    "INSERT INTO reply_dislikes (reply_id, user_id) VALUES (?, ?)", replyId, userId);
+            jdbcTemplate.update(
+                    "UPDATE replies SET dislike_count = dislike_count + 1 WHERE id = ?", replyId);
+            disliked = true;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT dislike_count FROM replies WHERE id = ?", Integer.class, replyId);
+        return Optional.of(new LikeResult(disliked, count == null ? 0 : count));
     }
 
     /**

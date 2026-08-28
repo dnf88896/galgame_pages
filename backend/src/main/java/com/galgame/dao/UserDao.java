@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.galgame.model.User;
 
@@ -29,12 +30,14 @@ public class UserDao {
             new User(
                     rs.getLong("id"),
                     rs.getString("username"),
+                    rs.getString("nickname"),
                     rs.getString("avatar_url"),
                     rs.getString("bio"),
                     rs.getTimestamp("created_at").toLocalDateTime(),
                     rs.getInt("admin_level"),
                     rs.getInt("hide_favorites"),
-                    nullableTimestamp(rs, "ban_until"));
+                    nullableTimestamp(rs, "ban_until"),
+                    rs.getInt("moe_points"));
 
     public UserDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -42,14 +45,14 @@ public class UserDao {
 
     public Optional<User> findById(Long id) {
         List<User> rows = jdbcTemplate.query(
-                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE id = ?",
+                "SELECT id, username, nickname, avatar_url, bio, admin_level, hide_favorites, ban_until, moe_points, created_at FROM users WHERE id = ?",
                 USER_ROW_MAPPER, id);
         return rows.stream().findFirst();
     }
 
     public Optional<User> findByUsername(String username) {
         List<User> rows = jdbcTemplate.query(
-                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE username = ?",
+                "SELECT id, username, nickname, avatar_url, bio, admin_level, hide_favorites, ban_until, moe_points, created_at FROM users WHERE username = ?",
                 USER_ROW_MAPPER, username);
         return rows.stream().findFirst();
     }
@@ -60,7 +63,7 @@ public class UserDao {
             return List.of();
         }
         StringBuilder sql = new StringBuilder(
-                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at FROM users WHERE id IN (");
+                "SELECT id, username, nickname, avatar_url, bio, admin_level, hide_favorites, ban_until, moe_points, created_at FROM users WHERE id IN (");
         for (int i = 0; i < ids.size(); i++) {
             if (i > 0) {
                 sql.append(", ");
@@ -103,14 +106,15 @@ public class UserDao {
         jdbcTemplate.update("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id);
     }
 
-    /** 新增用户，返回数据库生成的自增 id */
+    /** 新增用户，返回数据库生成的自增 id；昵称初始=账号名（可后续修改） */
     public Long insert(String username, String passwordHash) {
-        String sql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
+        String sql = "INSERT INTO users (username, nickname, password_hash) VALUES (?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, username);
-            ps.setString(2, passwordHash);
+            ps.setString(2, username);
+            ps.setString(3, passwordHash);
             return ps;
         }, keyHolder);
         return keyHolder.getKey().longValue();
@@ -118,6 +122,11 @@ public class UserDao {
 
     public void updateBio(Long id, String bio) {
         jdbcTemplate.update("UPDATE users SET bio = ? WHERE id = ?", bio, id);
+    }
+
+    /** 更新昵称（可重复，不做唯一校验；昵称为空/超长由接口层校验） */
+    public void updateNickname(Long id, String nickname) {
+        jdbcTemplate.update("UPDATE users SET nickname = ? WHERE id = ?", nickname, id);
     }
 
     /** 设置是否隐藏收藏列表：1 隐藏（他人不可见），0 公开（默认）。 */
@@ -139,12 +148,42 @@ public class UserDao {
         jdbcTemplate.update("UPDATE users SET ban_until = ? WHERE id = ?", until, id);
     }
 
-    /** 按用户名模糊搜索（最多 50 条，新注册优先）；用户名只允许中英文/数字/下划线，无需 LIKE 转义 */
+    /** 增减萌点（未来「消耗萌点」等功能用）：delta 可为正/负，GREATEST 保证结果不为负 */
+    public void adjustMoePoints(Long userId, int delta) {
+        jdbcTemplate.update(
+                "UPDATE users SET moe_points = GREATEST(0, moe_points + ?) WHERE id = ?", delta, userId);
+    }
+
+    /**
+     * 每日奖励（签到/发帖/评论）：同一天同一类型只奖一次，数据库唯一键兜底并发安全。
+     * 先 INSERT IGNORE 写 daily_rewards，affected==1 说明今日首次 → 加分并返回 true；否则返回 false（今日已奖励过）。
+     */
+    @Transactional
+    public boolean claimDailyReward(Long userId, String actionType, int amount) {
+        int affected = jdbcTemplate.update(
+                "INSERT IGNORE INTO daily_rewards (user_id, action_type, action_date) VALUES (?, ?, CURRENT_DATE)",
+                userId, actionType);
+        if (affected == 1) {
+            adjustMoePoints(userId, amount);
+            return true;
+        }
+        return false;
+    }
+
+    /** 今日是否已领取过某类型奖励（签到状态查询用） */
+    public boolean hasDailyReward(Long userId, String actionType) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM daily_rewards WHERE user_id = ? AND action_type = ? AND action_date = CURRENT_DATE",
+                Integer.class, userId, actionType);
+        return count != null && count > 0;
+    }
+
+    /** 按用户名/昵称模糊搜索（最多 50 条，新注册优先）；用户名只允许中英文/数字/下划线，无需 LIKE 转义 */
     public List<User> findByNameLike(String keyword) {
         return jdbcTemplate.query(
-                "SELECT id, username, avatar_url, bio, admin_level, hide_favorites, ban_until, created_at "
-                        + "FROM users WHERE username LIKE ? ORDER BY id DESC LIMIT 50",
-                USER_ROW_MAPPER, "%" + keyword + "%");
+                "SELECT id, username, nickname, avatar_url, bio, admin_level, hide_favorites, ban_until, moe_points, created_at "
+                        + "FROM users WHERE username LIKE ? OR nickname LIKE ? ORDER BY id DESC LIMIT 50",
+                USER_ROW_MAPPER, "%" + keyword + "%", "%" + keyword + "%");
     }
 
     private static LocalDateTime nullableTimestamp(ResultSet rs, String column) throws SQLException {

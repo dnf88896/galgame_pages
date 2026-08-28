@@ -1,7 +1,7 @@
 <template>
   <div class="page compose-page">
     <div class="compose-head">
-      <el-button link type="primary" @click="router.back()">← 返回</el-button>
+      <el-button link type="primary" @click="() => goBack(router)">← 返回</el-button>
       <h1 class="compose-title">发布帖子</h1>
     </div>
 
@@ -33,14 +33,34 @@
           />
         </el-form-item>
         <el-form-item label="正文">
-          <el-input
+          <MentionTextarea
             v-model="form.content"
-            type="textarea"
             :rows="8"
-            placeholder="写下你的想法、推荐、求助或资源说明"
-            maxlength="2000"
+            :maxlength="2000"
             show-word-limit
+            placeholder="写下你的想法、推荐、求助或资源说明"
           />
+          <div class="compose-emoji-bar">
+            <el-button
+              class="emoji-toggle"
+              :class="{ active: emojiVisible }"
+              type="text"
+              @click="emojiVisible = !emojiVisible"
+            >😀 表情</el-button>
+            <EmojiPicker
+              v-if="emojiVisible"
+              class="compose-emoji-picker"
+              @pick="onEmoji"
+            />
+          </div>
+        </el-form-item>
+
+        <el-form-item label="封面图（可选）">
+          <input type="file" accept="image/*" @change="onCoverChange" />
+          <div v-if="coverFile" class="cover-picked">
+            <img :src="coverPreview" class="cover-preview" alt="封面预览" />
+            <el-button link type="danger" @click="removeCover">移除封面</el-button>
+          </div>
         </el-form-item>
 
         <el-form-item label="附件">
@@ -79,8 +99,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import EmojiPicker from '../components/EmojiPicker.vue'
+import MentionTextarea from '../components/MentionTextarea.vue'
+import { goBack } from '../utils/navigation'
 import { token } from '../store/user'
 import { categories, formatSize, getErrorMessage, fetchTagStructure } from '../utils/format'
+import { refreshMoe } from '../utils/moeGain'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +122,31 @@ const formStatus = ref('')
 const formStatusError = ref(false)
 const attachmentQueue = ref([])
 const titleInputRef = ref(null)
+
+// 封面图：单张图片，提交时随 multipart 一起发 cover 字段（可选）
+const coverFile = ref(null)
+const coverPreview = ref('')
+const emojiVisible = ref(false)
+
+function onCoverChange(e) {
+  const f = e.target.files && e.target.files[0]
+  if (f) {
+    coverFile.value = f
+    coverPreview.value = URL.createObjectURL(f)
+  }
+  e.target.value = ''
+}
+
+function removeCover() {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+  coverFile.value = null
+  coverPreview.value = ''
+}
+
+// 点选 emoji 追加到正文末尾（面板保持展开，可连续插入）
+function onEmoji(e) {
+  form.content += e
+}
 
 // 标签结构：GET /api/tags 返回 { categories: [{ key, label, sections: [{key,label}] }] }
 // 分区（categories 常量）与标签（tagStructure）相互独立，不做联动
@@ -149,13 +198,19 @@ async function submit() {
   for (const f of attachmentQueue.value) {
     fd.append('attachments', f, f.name)
   }
+  if (coverFile.value) {
+    fd.append('cover', coverFile.value, coverFile.value.name)
+  }
 
   submitting.value = true
   formStatus.value = '正在发布...'
   formStatusError.value = false
   try {
     const { data } = await api.post('/posts', fd)
+    if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
     ElMessage.success('发布成功')
+    // 每日首次发帖 +10 萌点：refreshMoe 检测增量弹「+n萌点」并同步（非首次不加分则不弹）
+    refreshMoe()
     // 发布成功直接进入帖子详情页
     router.push(`/post/${data.id}`)
   } catch (e) {
@@ -260,5 +315,37 @@ onMounted(async () => {
 }
 .form-status.error {
   color: #f56c6c;
+}
+/* 正文 emoji 开关 + 面板 */
+.compose-emoji-bar {
+  margin-top: 8px;
+}
+.compose-emoji-picker {
+  margin-top: 8px;
+}
+.emoji-toggle {
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.emoji-toggle.active {
+  color: #409eff;
+}
+/* 封面图预览 */
+.cover-picked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  width: 100%;
+}
+.cover-preview {
+  display: block;
+  max-width: 260px;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+  background: #f5f7fa;
 }
 </style>

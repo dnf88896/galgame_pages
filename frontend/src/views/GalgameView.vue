@@ -4,14 +4,18 @@
       <header class="gal-header">
         <div class="gal-header-row">
           <button class="gal-back-btn" @click="goHome">← 返回首页</button>
-          <button v-if="isAdmin" class="gal-add-btn" @click="router.push('/galgame/new')">+ 添加galgame</button>
+          <div class="gal-header-actions">
+            <button v-if="isAdmin" class="gal-review-btn" @click="router.push('/galgame/review')">审核galgame信息</button>
+            <button v-if="isLoggedIn" class="gal-mine-btn" @click="router.push('/galgame/mine')">我的提交</button>
+            <button v-if="isLoggedIn" class="gal-add-btn" @click="router.push('/galgame/new')">+ 添加galgame</button>
+          </div>
         </div>
         <h1 class="gal-title">Galgame 资源</h1>
         <p class="gal-subtitle">Galgame 资源页面，提供各类 Galgame 下载。按类型 / 语言 / 平台 / 作品分类筛选。</p>
       </header>
 
       <div class="gal-filters">
-        <!-- 排序行：总浏览数 / 创建顺序 / 发售日期 / 评分；后两项暂未实现，点击提示未上线 -->
+        <!-- 排序行：总浏览数 / 创建顺序 / 发售日期 / 评分；发售日期两态切换，右侧紧跟方向箭头 -->
         <div class="gal-filter-row">
           <span class="gal-filter-name">排序</span>
           <div class="gal-filter-btns">
@@ -19,9 +23,9 @@
               v-for="opt in sortOptions"
               :key="opt.value"
               class="gal-filter-btn"
-              :class="{ active: sortBy === opt.value }"
+              :class="{ active: isSortActive(opt.value) }"
               @click="setSort(opt.value)"
-            >{{ opt.label }}</button>
+            >{{ opt.label }}<span v-if="sortArrowOf(opt.value)" class="gal-sort-arrow">{{ sortArrowOf(opt.value) }}</span></button>
           </div>
         </div>
         <div v-for="row in rows" :key="row.key" class="gal-filter-row">
@@ -114,15 +118,17 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import api from '../api'
 import { fetchTagStructure, sectionLabel, getErrorMessage, resolveAssetUrl } from '../utils/format'
 import { user } from '../store/user'
 
 const router = useRouter()
 
-// 管理员（admin_level > 0）才显示「添加galgame」入口；等级来自 store，认证后实时刷新
+// 管理员（admin_level > 0）才显示「审核galgame信息」入口；等级来自 store，认证后实时刷新
 const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
+
+// 登录用户（有 id）才显示「添加galgame」入口
+const isLoggedIn = computed(() => !!user.value?.id)
 
 // 四行筛选配置（仿 kungal，行序一致：类型 / 语言 / 平台 / 作品；单选）：
 // key 对应 filters 里的字段；prefix 是 galgame-resource 大类下小分支 key 的前缀
@@ -148,7 +154,9 @@ const rows = computed(() => {
 const filters = reactive({ type: '', lang: '', plat: '', work: '' })
 const tagCategories = ref([])
 
-// 排序：created 默认（管理员添加顺序，最新在上）/ views 总浏览数 / release_date、rating 暂未实现
+// 排序：created 默认（管理员添加顺序，最新在上）/ views 总浏览数 /
+// rating 评分 / release_date 发售日期——后三个都是两态切换：
+// 第一下倒序（从高到低/从新到旧，右侧 ↑），再按一下升序（从低到高/从旧到新，右侧 ↓）
 const sortOptions = [
   { value: 'views', label: '总浏览数' },
   { value: 'created', label: '创建顺序' },
@@ -156,15 +164,40 @@ const sortOptions = [
   { value: 'rating', label: '评分' },
 ]
 const sortBy = ref('created')
-const SORT_LABEL = { release_date: '发售日期', rating: '评分' }
 
+// 两态排序：按钮 value → { desc, asc } 对应的 sort 参数值（desc 是第一下/默认方向）
+const SORT_DIR = {
+  views: { desc: 'views', asc: 'views_asc' },
+  rating: { desc: 'rating', asc: 'rating_asc' },
+  release_date: { desc: 'release_date_desc', asc: 'release_date_asc' },
+}
+
+// 两态按钮：当前 asc → 切回 desc；当前 desc → 切 asc；尚未激活 → 第一下进 desc。created 单选
 function setSort(val) {
-  if (val === 'release_date' || val === 'rating') {
-    ElMessage.info(`「${SORT_LABEL[val]}」排序暂未上线，敬请期待。`)
-    return
+  const dir = SORT_DIR[val]
+  if (dir) {
+    if (sortBy.value === dir.asc) sortBy.value = dir.desc
+    else sortBy.value = sortBy.value === dir.desc ? dir.asc : dir.desc
+  } else {
+    sortBy.value = val
   }
-  sortBy.value = val
   load()
+}
+
+// 选中态：两态按钮的两种方向都视为激活
+function isSortActive(val) {
+  const dir = SORT_DIR[val]
+  if (dir) return sortBy.value === dir.desc || sortBy.value === dir.asc
+  return sortBy.value === val
+}
+
+// 两态按钮右侧的箭头：desc（倒序）↑、asc（升序）↓，其它无箭头
+function sortArrowOf(val) {
+  const dir = SORT_DIR[val]
+  if (!dir) return ''
+  if (sortBy.value === dir.desc) return '↑'
+  if (sortBy.value === dir.asc) return '↓'
+  return ''
 }
 
 const hasFilter = computed(() => Object.values(filters).some((v) => v !== ''))
@@ -289,6 +322,42 @@ onMounted(() => {
 .gal-back-btn:hover {
   text-decoration: underline;
 }
+.gal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.gal-review-btn {
+  border: 1px solid #e6a23c;
+  background: #e6a23c;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.gal-review-btn:hover {
+  background: #ebb563;
+  border-color: #ebb563;
+}
+/* 「我的提交」：中性蓝描边浅底，介于 warning 审核与 primary 添加之间 */
+.gal-mine-btn {
+  border: 1px solid #409eff;
+  background: #ecf5ff;
+  color: #409eff;
+  border-radius: 6px;
+  padding: 4px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.gal-mine-btn:hover {
+  background: #409eff;
+  color: #fff;
+}
 .gal-add-btn {
   border: 1px solid #409eff;
   background: #409eff;
@@ -360,6 +429,12 @@ onMounted(() => {
   color: #409eff;
   font-weight: 600;
   border-color: #409eff;
+}
+/* 发售日期按钮右侧紧贴的方向箭头（↑ 从新到旧 / ↓ 从旧到新） */
+.gal-sort-arrow {
+  margin-left: 4px;
+  font-size: 11px;
+  line-height: 1;
 }
 .gal-reset-btn {
   margin: 10px 0 2px;

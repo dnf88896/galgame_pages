@@ -5,7 +5,7 @@
       <router-link v-if="peer" :to="`/user/${userId}`" class="chat-user">
         <el-avatar v-if="peer.avatar_url" :src="avatarSrc" :size="32" />
         <el-avatar v-else :size="32" class="avatar-text">{{ firstChar }}</el-avatar>
-        <span class="chat-username">{{ peer.username }}</span>
+        <span class="chat-username">{{ peer.nickname || peer.username }}</span>
       </router-link>
       <span v-else class="chat-title">私聊</span>
     </div>
@@ -48,21 +48,46 @@
           class="msg-row"
           :class="{ mine: Number(m.sender_id) === myId }"
         >
-          <div class="bubble">{{ m.content }}</div>
-          <div class="msg-time">{{ formatTime(m.created_at) }}</div>
+          <div class="bubble" :class="{ recalled: m.is_recalled }">{{ m.is_recalled ? '已撤回' : m.content }}</div>
+          <div class="msg-meta">
+            <el-button
+              v-if="canRecall(m)"
+              link
+              type="info"
+              size="small"
+              class="recall-btn"
+              @click="recall(m)"
+            >撤回</el-button>
+            <span class="msg-time">{{ formatTime(m.created_at) }}</span>
+          </div>
         </div>
       </div>
 
       <div v-if="!(blockedByMe || blockedByThem)" class="chat-input">
-        <el-input
-          v-model="draft"
-          type="textarea"
-          :rows="2"
-          maxlength="2000"
-          show-word-limit
-          placeholder="输入消息，回车发送"
-          @keydown.enter.exact.prevent="send"
-        />
+        <div class="chat-input-main">
+          <div class="chat-emoji-bar">
+            <el-button
+              class="emoji-toggle"
+              :class="{ active: emojiVisible }"
+              type="text"
+              @click="emojiVisible = !emojiVisible"
+            >😀</el-button>
+            <EmojiPicker
+              v-if="emojiVisible"
+              class="chat-emoji-picker"
+              @pick="onEmoji"
+            />
+          </div>
+          <el-input
+            v-model="draft"
+            type="textarea"
+            :rows="2"
+            maxlength="2000"
+            show-word-limit
+            placeholder="输入消息，回车发送"
+            @keydown.enter.exact.prevent="send"
+          />
+        </div>
         <el-button type="primary" :loading="sending" @click="send">发送</el-button>
       </div>
     </template>
@@ -74,6 +99,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import EmojiPicker from '../components/EmojiPicker.vue'
 import { user as currentUser, requireLogin } from '../store/user'
 import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
 
@@ -90,6 +116,32 @@ const loadError = ref('')
 const draft = ref('')
 const sending = ref(false)
 
+// 输入区 emoji 面板显隐；点选追加到草稿末尾
+const emojiVisible = ref(false)
+
+function onEmoji(e) {
+  draft.value += e
+}
+
+// 两分钟内可撤回：自己发的、未撤回、且创建至今不超过 2 分钟
+const RECALL_WINDOW_MS = 2 * 60 * 1000
+
+function canRecall(m) {
+  if (m.is_recalled || Number(m.sender_id) !== myId.value) return false
+  if (!m.created_at) return false
+  return Date.now() - new Date(m.created_at).getTime() <= RECALL_WINDOW_MS
+}
+
+// 撤回自己发的消息：只调接口，轮询会从服务器同步 is_recalled
+async function recall(m) {
+  try {
+    const { data } = await api.post(`/dm/messages/${m.id}/recall`)
+    Object.assign(m, data)
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '撤回失败'))
+  }
+}
+
 const blockedByMe = ref(false)
 const blockedByThem = ref(false)
 
@@ -97,7 +149,7 @@ const listRef = ref(null)
 
 const myId = computed(() => (currentUser.value ? Number(currentUser.value.id) : null))
 const avatarSrc = computed(() => resolveAssetUrl(peer.value?.avatar_url))
-const firstChar = computed(() => (peer.value?.username || '?').slice(0, 1).toUpperCase())
+const firstChar = computed(() => (peer.value?.nickname || peer.value?.username || '?').slice(0, 1).toUpperCase())
 
 async function load() {
   const id = userId.value
@@ -291,10 +343,33 @@ onBeforeUnmount(stopPolling)
   border-color: #409eff;
   color: #fff;
 }
+/* 已撤回：灰色斜体占位，替代原文 */
+.bubble.recalled {
+  color: #909399;
+  background: #f5f7fa;
+  border-color: #f5f7fa;
+  font-style: italic;
+}
+.msg-row.mine .bubble.recalled {
+  color: #909399;
+  background: #f0f2f5;
+  border-color: #f0f2f5;
+}
+/* 气泡下方元信息行：时间 + 撤回按钮 */
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
 .msg-time {
   font-size: 12px;
   color: #999;
-  margin-top: 4px;
+}
+.recall-btn {
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
 }
 .chat-input {
   flex-shrink: 0;
@@ -304,7 +379,22 @@ onBeforeUnmount(stopPolling)
   padding: 12px 0 16px;
   border-top: 1px solid #e4e7ed;
 }
-.chat-input .el-input {
+.chat-input-main {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-emoji-picker {
+  margin-top: 4px;
+}
+.emoji-toggle {
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.emoji-toggle.active {
+  color: #409eff;
 }
 </style>

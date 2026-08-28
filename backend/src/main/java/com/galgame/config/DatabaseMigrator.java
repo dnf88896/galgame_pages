@@ -37,6 +37,24 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "CONSTRAINT fk_reply_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+    private static final String POST_DISLIKES_DDL =
+            "CREATE TABLE post_dislikes ("
+                    + "post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (post_id, user_id), "
+                    + "CONSTRAINT fk_post_dislikes_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_post_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String REPLY_DISLIKES_DDL =
+            "CREATE TABLE reply_dislikes ("
+                    + "reply_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (reply_id, user_id), "
+                    + "CONSTRAINT fk_reply_dislikes_reply FOREIGN KEY (reply_id) REFERENCES replies (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_reply_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
     private static final String POST_FAVORITES_DDL =
             "CREATE TABLE post_favorites ("
                     + "post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
@@ -75,6 +93,71 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "CONSTRAINT fk_reports_user FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+    private static final String POLLS_DDL =
+            "CREATE TABLE polls ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "title VARCHAR(100) NOT NULL, "
+                    + "description VARCHAR(500) NOT NULL DEFAULT '', "
+                    + "type VARCHAR(10) NOT NULL DEFAULT 'single', "
+                    + "min_choice INT NOT NULL DEFAULT 1, "
+                    + "max_choice INT NOT NULL DEFAULT 1, "
+                    + "deadline DATETIME NULL, "
+                    + "status VARCHAR(10) NOT NULL DEFAULT 'open', "
+                    + "result_visibility VARCHAR(20) NOT NULL DEFAULT 'always', "
+                    + "is_anonymous TINYINT(1) NOT NULL DEFAULT 0, "
+                    + "can_change_vote TINYINT(1) NOT NULL DEFAULT 1, "
+                    + "post_id BIGINT NOT NULL, "
+                    + "user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_polls_post_id (post_id), "
+                    + "KEY idx_polls_user_id (user_id), "
+                    + "CONSTRAINT fk_polls_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_polls_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String POLL_OPTIONS_DDL =
+            "CREATE TABLE poll_options ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "text VARCHAR(100) NOT NULL, "
+                    + "poll_id BIGINT NOT NULL, "
+                    + "vote_count INT NOT NULL DEFAULT 0, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_poll_options_poll (poll_id), "
+                    + "CONSTRAINT fk_poll_options_poll FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String POLL_VOTES_DDL =
+            "CREATE TABLE poll_votes ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "poll_id BIGINT NOT NULL, "
+                    + "option_id BIGINT NOT NULL, "
+                    + "user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "UNIQUE KEY uk_poll_option_user (poll_id, option_id, user_id), "
+                    + "KEY idx_poll_votes_user (user_id, poll_id), "
+                    + "KEY idx_poll_votes_option (option_id), "
+                    + "CONSTRAINT fk_poll_votes_poll FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_poll_votes_option FOREIGN KEY (option_id) REFERENCES poll_options (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_poll_votes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String DAILY_REWARDS_DDL =
+            "CREATE TABLE daily_rewards ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "user_id BIGINT NOT NULL, "
+                    + "action_type VARCHAR(20) NOT NULL, "
+                    + "action_date DATE NOT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "UNIQUE KEY uk_daily_user_action (user_id, action_type, action_date), "
+                    + "KEY idx_daily_user_date (user_id, action_date), "
+                    + "CONSTRAINT fk_daily_rewards_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
     private final JdbcTemplate jdbcTemplate;
 
     public DatabaseMigrator(JdbcTemplate jdbcTemplate) {
@@ -88,6 +171,9 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("replies", "user_id", "BIGINT NULL");
         // 管理员权限等级：旧库 users 表补 admin_level 列（默认 0 = 普通用户）
         ensureColumn("users", "admin_level", "INT NOT NULL DEFAULT 0");
+        // 用户昵称：旧库 users 表补 nickname 列（可重复，初始=账号名），并回填存量数据
+        ensureColumn("users", "nickname", "VARCHAR(32) NULL COMMENT '用户昵称，初始=账号名，可重复'");
+        backfillNickname();
         ensurePostTagsTable();
         migratePostSectionsToTags();
         dropColumnIfExists("posts", "section");
@@ -103,6 +189,19 @@ public class DatabaseMigrator implements ApplicationRunner {
 
         ensureLikeTable("post_likes", POST_LIKES_DDL);
         ensureLikeTable("reply_likes", REPLY_LIKES_DDL);
+        // 点踩：与点赞独立的 dislike 表 + 计数列
+        ensureColumn("posts", "dislike_count", "INT NOT NULL DEFAULT 0");
+        ensureColumn("replies", "dislike_count", "INT NOT NULL DEFAULT 0");
+        ensureLikeTable("post_dislikes", POST_DISLIKES_DDL);
+        ensureLikeTable("reply_dislikes", REPLY_DISLIKES_DDL);
+        // 帖子封面图
+        ensureColumn("posts", "cover_image", "VARCHAR(500) NULL");
+        // 帖子置顶：管理员设置截止时间（NULL=未置顶，过期自动视为不置顶）
+        ensureColumn("posts", "pinned_until", "DATETIME NULL");
+        // 评论置顶：发帖人/管理员可置顶（无时间限制）
+        ensureColumn("replies", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0");
+        // 私信撤回
+        ensureColumn("dm_messages", "is_recalled", "TINYINT(1) NOT NULL DEFAULT 0");
         // 收藏夹：旧库 users 表补 hide_favorites 列（默认 0 = 公开），并确保 post_favorites 表存在
         ensureColumn("users", "hide_favorites", "TINYINT NOT NULL DEFAULT 0");
         ensureLikeTable("post_favorites", POST_FAVORITES_DDL);
@@ -118,6 +217,17 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("galgames", "view_count", "INT NOT NULL DEFAULT 0");
         ensureColumn("galgames", "release_date", "DATE NULL");
         migrateGalgameRating();
+        // Galgame 提交审核：旧库 galgames 补 status（存量默认 approved=已上架）/ reject_reason / reviewed_at 列
+        ensureColumn("galgames", "status", "VARCHAR(20) NOT NULL DEFAULT 'approved'");
+        ensureColumn("galgames", "reject_reason", "VARCHAR(500) NULL");
+        ensureColumn("galgames", "reviewed_at", "DATETIME NULL");
+        // 审核通过萌点奖励标记：每条 galgame 只发一次（防反复通过/拒绝刷萌点）
+        ensureColumn("galgames", "moe_awarded", "TINYINT(1) NOT NULL DEFAULT 0");
+        // 帖子投票：schema.sql 已建三表，这里兜底旧库
+        ensurePollTables();
+        // 萌点系统：旧库 users 表补 moe_points 列（默认 0），并确保 daily_rewards 防重表存在
+        ensureColumn("users", "moe_points", "INT NOT NULL DEFAULT 0");
+        ensureTableIfAbsent("daily_rewards", DAILY_REWARDS_DDL);
 
         recomputeLikeCounts();
     }
@@ -141,6 +251,26 @@ public class DatabaseMigrator implements ApplicationRunner {
                 Integer.class, table);
         if (visitorCol != null && visitorCol > 0) {
             jdbcTemplate.execute("DROP TABLE " + table);
+            jdbcTemplate.execute(createDdl);
+        }
+    }
+
+    /**
+     * 帖子投票：确保 polls / poll_options / poll_votes 三张表存在（schema.sql 会建，这里兜底旧库）。
+     * 投票表无历史结构，只需建表，不需要 ensureLikeTable 的 visitor_id 结构检测。
+     */
+    private void ensurePollTables() {
+        ensureTableIfAbsent("polls", POLLS_DDL);
+        ensureTableIfAbsent("poll_options", POLL_OPTIONS_DDL);
+        ensureTableIfAbsent("poll_votes", POLL_VOTES_DDL);
+    }
+
+    private void ensureTableIfAbsent(String table, String createDdl) {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.TABLES "
+                        + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                Integer.class, table);
+        if (exists == null || exists == 0) {
             jdbcTemplate.execute(createDdl);
         }
     }
@@ -215,6 +345,14 @@ public class DatabaseMigrator implements ApplicationRunner {
      * 嵌套回复父作者快照回填：旧库已有的嵌套回复，从仍存活的父回复把作者名抄到 parent_author。
      * 只回填能 JOIN 到父回复的行；父已删除的历史数据无法回填，保持 NULL（前端回退处理）。
      */
+    /**
+     * 昵称回填：存量用户昵称初始化为账号名（新注册用户 insert 时已直接写 nickname=username）。
+     */
+    private void backfillNickname() {
+        jdbcTemplate.update(
+                "UPDATE users SET nickname = username WHERE nickname IS NULL OR nickname = ''");
+    }
+
     private void backfillParentAuthor() {
         jdbcTemplate.update(
                 "UPDATE replies r JOIN replies p ON r.parent_id = p.id "

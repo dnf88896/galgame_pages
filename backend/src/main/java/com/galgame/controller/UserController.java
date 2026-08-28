@@ -83,10 +83,10 @@ public class UserController {
         List<RecentPost> recentPosts = hidden ? List.of() : postDao.findRecentPostsByUser(id, 5);
 
         UserProfile profile = new UserProfile(
-                user.id(), user.username(), user.avatarUrl(), user.bio(), user.createdAt(),
+                user.id(), user.username(), user.nickname(), user.avatarUrl(), user.bio(), user.createdAt(),
                 user.adminLevel(), postCount, replyCount, receivedLikes, recentPosts,
                 followDao.countFollowers(id), followDao.countFollowing(id), isFollowing, isBlocked,
-                postDao.countFavorites(id), user.hideFavorites(), user.banUntil());
+                postDao.countFavorites(id), user.hideFavorites(), user.moePoints(), user.banUntil());
         return ResponseEntity.ok(profile);
     }
 

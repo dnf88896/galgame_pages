@@ -27,9 +27,11 @@
         <template v-if="!editMode">
           <div class="gal-detail-head">
             <el-button link type="primary" @click="goBack">← 返回</el-button>
-            <div v-if="isAdmin" class="gal-detail-actions">
+            <div v-if="canEdit" class="gal-detail-actions">
+              <el-button v-if="isAdmin && isPending" type="success" plain size="small" @click="approve">通过审核</el-button>
+              <el-button v-if="isAdmin && isPending" type="warning" plain size="small" @click="reject">拒绝</el-button>
               <el-button type="primary" plain size="small" @click="enterEdit">编辑</el-button>
-              <el-button type="danger" plain size="small" @click="remove">删除</el-button>
+              <el-button v-if="canDelete" type="danger" plain size="small" @click="remove">删除</el-button>
             </div>
           </div>
 
@@ -44,7 +46,18 @@
               <div v-else class="gal-detail-cover-placeholder">无封面</div>
             </div>
             <div class="gal-detail-body">
-              <h1 class="gal-detail-name">{{ detail.name }}</h1>
+              <div class="gal-detail-name-row">
+                <h1 class="gal-detail-name">{{ detail.name }}</h1>
+                <el-tag v-if="detail.status === 'pending'" type="warning" size="small">待审核</el-tag>
+                <el-tag v-else-if="detail.status === 'rejected'" type="danger" size="small">已拒绝</el-tag>
+              </div>
+              <el-alert
+                v-if="detail.status === 'rejected' && detail.reject_reason"
+                :title="`拒绝理由：${detail.reject_reason}`"
+                type="error"
+                :closable="false"
+                class="gal-reject-reason"
+              />
               <div v-if="detail.tags && detail.tags.length" class="gal-tags">
                 <span v-for="k in detail.tags" :key="k" class="gal-tag">#{{ sectionLabel(tagCategories, k) || k }}</span>
               </div>
@@ -62,28 +75,32 @@
                 <span v-else class="gal-no-link">暂无资源链接</span>
               </div>
               <div class="gal-detail-meta">
+                <span v-if="detail.creator">提交人：{{ detail.creator }}</span>
                 <span v-if="detail.release_date">发售：{{ detail.release_date }}</span>
                 <span>评分：{{ detail.rating_avg != null ? `${Number(detail.rating_avg).toFixed(1)} / 10` : '暂无' }}<template v-if="detail.rating_count > 0">（{{ detail.rating_count }} 人评分）</template></span>
                 <span v-if="detail.created_at">创建：{{ formatTime(detail.created_at) }}</span>
                 <span v-if="detail.updated_at">更新：{{ formatTime(detail.updated_at) }}</span>
               </div>
               <div class="gal-rate-row">
-                <el-rate
-                  v-model="myScore"
-                  :max="10"
-                  allow-half
-                  show-score
-                  score-template="{value} 分"
-                  :disabled="!!detail.rated"
-                />
-                <el-button
-                  v-if="!detail.rated"
-                  type="primary"
-                  plain
-                  size="small"
-                  @click="submitRating"
-                >提交评分</el-button>
-                <span v-else class="gal-rated-hint">你已评过分</span>
+                <template v-if="detail.status === 'approved'">
+                  <el-rate
+                    v-model="myScore"
+                    :max="10"
+                    allow-half
+                    show-score
+                    score-template="{value} 分"
+                    :disabled="!!detail.rated"
+                  />
+                  <el-button
+                    v-if="!detail.rated"
+                    type="primary"
+                    plain
+                    size="small"
+                    @click="submitRating"
+                  >提交评分</el-button>
+                  <span v-else class="gal-rated-hint">你已评过分</span>
+                </template>
+                <span v-else class="gal-rated-hint">审核通过后可评分</span>
               </div>
             </div>
           </div>
@@ -203,6 +220,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
+import { refreshMoe } from '../utils/moeGain'
 import { fetchTagStructure, sectionLabel, getErrorMessage, resolveAssetUrl, formatTime } from '../utils/format'
 
 const route = useRoute()
@@ -210,8 +228,23 @@ const router = useRouter()
 
 const galgameId = route.params.id
 
-// 管理员（admin_level > 0）才显示编辑/删除；等级来自 store，认证后实时刷新
+// 管理员（admin_level > 0）才显示编辑/删除/审核；等级来自 store，认证后实时刷新
 const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
+
+// 是否本条目的创建者（后端 galgames.created_by，数字 id）
+const isCreator = computed(() => detail.value?.created_by != null && detail.value.created_by === Number(user.value?.id))
+
+// 是否待审核状态
+const isPending = computed(() => detail.value?.status === 'pending')
+
+// 可编辑：管理员，或创建者且条目未通过审核（pending/rejected 可改自己提交）
+const canEdit = computed(() => isAdmin.value || (isCreator.value && detail.value?.status !== 'approved'))
+
+// 可删除：管理员任意删，但 pending 审核中不显示删除（用通过/拒绝处置，避免审核界面出现删除）；
+// 普通创建者仅 pending 可删自己提交
+const canDelete = computed(() =>
+  (isAdmin.value && detail.value?.status !== 'pending') ||
+  (isCreator.value && detail.value?.status === 'pending'))
 
 const detail = ref(null)
 const loading = ref(false)
@@ -406,6 +439,47 @@ async function remove() {
   }
 }
 
+// 通过审核：POST /galgames/{id}/review { status: 'approved' }，成功后刷新详情。
+// 提交者恰为当前用户（管理员审核自己的提交）时 +10，refreshMoe 检测增量弹「+n萌点」；审核他人无变化不弹。
+async function approve() {
+  try {
+    await api.post(`/galgames/${galgameId}/review`, { status: 'approved' })
+    ElMessage.success('已通过审核')
+    refreshMoe()
+    await loadDetail()
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  }
+}
+
+// 拒绝：弹框填理由 → POST /galgames/{id}/review { status: 'rejected', reason }，成功后刷新详情
+async function reject() {
+  let reason = ''
+  try {
+    const { value } = await ElMessageBox.prompt('请填写拒绝理由', '拒绝', {
+      type: 'warning',
+      inputPlaceholder: '拒绝理由',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (v && String(v).trim() ? true : '请填写拒绝理由。'),
+    })
+    reason = (value || '').trim()
+  } catch {
+    return // 用户取消，什么都不做
+  }
+  if (!reason) {
+    ElMessage.warning('请填写拒绝理由。')
+    return
+  }
+  try {
+    await api.post(`/galgames/${galgameId}/review`, { status: 'rejected', reason })
+    ElMessage.success('已拒绝')
+    await loadDetail()
+  } catch (e) {
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  }
+}
+
 function openLink(url) {
   if (!url) return
   window.open(url, '_blank', 'noopener')
@@ -482,11 +556,24 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
 }
+.gal-detail-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.gal-detail-name-row .gal-detail-name {
+  margin: 0;
+}
 .gal-detail-name {
   font-size: 24px;
   font-weight: 700;
   color: #303133;
   margin: 0 0 8px;
+}
+.gal-reject-reason {
+  margin-bottom: 12px;
 }
 .gal-detail-staff {
   margin: 12px 0 0;

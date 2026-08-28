@@ -1,6 +1,6 @@
 <template>
   <div class="page messages-page">
-    <el-page-header content="消息" @back="$router.push('/')" />
+    <el-page-header content="消息" @back="() => goBack(router)" />
 
     <el-tabs v-model="activeTab" style="margin-top: 12px" @tab-change="onTabChange">
       <el-tab-pane label="私信" name="dm">
@@ -28,7 +28,7 @@
             <el-avatar v-else :size="44" class="avatar-text">{{ firstCharOf(item.user) }}</el-avatar>
             <div class="conv-main">
               <div class="conv-top">
-                <span class="conv-name">{{ item.user.username }}</span>
+                <span class="conv-name">{{ item.user.nickname || item.user.username }}</span>
                 <span v-if="lastTimeOf(item)" class="conv-time">{{ lastTimeOf(item) }}</span>
               </div>
               <div class="conv-preview">{{ lastPreviewOf(item) }}</div>
@@ -101,6 +101,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
+import { goBack } from '../utils/navigation'
 import { user, requireLogin } from '../store/user'
 import { bumpUnreadRefresh } from '../store/unread'
 import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
@@ -135,18 +136,19 @@ function avatarSrcOf(u) {
 }
 
 function firstCharOf(u) {
-  return (u?.username || '?').slice(0, 1).toUpperCase()
+  return (u?.nickname || u?.username || '?').slice(0, 1).toUpperCase()
 }
 
 function lastTimeOf(item) {
   return item.last_message ? formatTime(item.last_message.created_at) : ''
 }
 
-// 最后一条消息预览：自己的消息加「我: 」前缀；无消息给占位文案
+// 最后一条消息预览：自己的消息加「我: 」前缀；无消息给占位文案；已撤回显示占位
 function lastPreviewOf(item) {
   const lm = item.last_message
   if (!lm) return '还没有消息'
-  return Number(lm.sender_id) === Number(user.value?.id) ? `我: ${lm.content}` : lm.content
+  const preview = lm.is_recalled ? '[已撤回]' : lm.content
+  return Number(lm.sender_id) === Number(user.value?.id) ? `我: ${preview}` : preview
 }
 
 // ---- 通知 tab ----
@@ -203,7 +205,7 @@ async function onTabChange(name) {
 function notifTitle(n) {
   if (n.type === 'announcement') return n.title || '公告'
   if (n.type === 'report' || n.type === 'warning') return n.title || (n.type === 'report' ? '举报受理结果' : '内容被删除')
-  const name = n.actor?.username || '有人'
+  const name = (n.actor?.nickname || n.actor?.username) || '有人'
   if (n.type === 'mention') return `${name} 提到你`
   return `${name} 有新消息`
 }
@@ -241,7 +243,7 @@ function notifAvatarSrc(n) {
 }
 
 function notifFirstChar(n) {
-  return (n.actor?.username || '?').slice(0, 1).toUpperCase()
+  return (n.actor?.nickname || n.actor?.username || '?').slice(0, 1).toUpperCase()
 }
 
 // 有 post_id 才允许跳转帖子详情

@@ -2,7 +2,7 @@
   <div class="page section-page">
     <!-- ============ 大类页：无 section 参数 ============ -->
     <template v-if="!route.params.section">
-      <el-page-header content="分区" @back="goHome" />
+      <el-page-header content="分区" @back="() => goBack(router)" />
 
       <div v-if="tagLoading" class="status-block">
         <el-skeleton :rows="4" animated />
@@ -77,6 +77,17 @@
             </span>
             <span class="dot">·</span>
             <span class="time">{{ formatTime(p.created_at) }}</span>
+            <span class="pin-area">
+              <span v-if="isPinned(p)" class="pinned-badge">置顶</span>
+              <el-button
+                v-if="isAdminUser"
+                link
+                type="warning"
+                size="small"
+                class="pin-btn"
+                @click="togglePin(p)"
+              >{{ isPinned(p) ? '取消置顶' : '置顶' }}</el-button>
+            </span>
           </div>
           <h2 class="post-title" @click="goPost(p.id)">{{ p.title }}</h2>
           <p class="excerpt">{{ p.content }}</p>
@@ -98,13 +109,17 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { goBack } from '../utils/navigation'
+import { user } from '../store/user'
 import AttachmentList from '../components/AttachmentList.vue'
 import {
   fetchTagStructure,
   sectionLabel,
   formatTime,
   getErrorMessage,
+  isPinned,
 } from '../utils/format'
 
 const route = useRoute()
@@ -164,14 +179,43 @@ async function loadPosts() {
   }
 }
 
-function goHome() {
-  router.push('/')
-}
 function goBackToCategory() {
   router.push(`/tag/${route.params.category}`)
 }
 function goPost(id) {
   router.push(`/post/${id}`)
+}
+
+// 管理员才能看到帖子置顶/取消置顶入口
+const isAdminUser = computed(() => !!user.value && Number(user.value.admin_level) > 0)
+
+// 置顶/取消置顶：未置顶弹窗输入天数（正整数），已置顶确认后取消；成功后刷新列表
+async function togglePin(p) {
+  if (isPinned(p)) {
+    try {
+      await ElMessageBox.confirm('取消该帖的置顶？', '取消置顶', { type: 'warning' })
+      await api.put(`/posts/${p.id}/pin`, { days: 0 })
+      ElMessage.success('已取消置顶')
+      await loadPosts()
+    } catch (e) {
+      if (typeof e === 'string') return // 用户取消弹窗
+      ElMessage.error(getErrorMessage(e, '操作失败'))
+    }
+    return
+  }
+  try {
+    const { value } = await ElMessageBox.prompt('请输入置顶天数', '置顶帖子', {
+      inputPattern: /^[1-9]\d*$/,
+      inputErrorMessage: '请输入正整数天数',
+      inputValue: '1',
+    })
+    await api.put(`/posts/${p.id}/pin`, { days: Number(value) })
+    ElMessage.success('已置顶')
+    await loadPosts()
+  } catch (e) {
+    if (typeof e === 'string') return // 用户取消弹窗
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  }
 }
 
 // 帖子卡片分区标签：直接显示板块名（category），tags 标签显示 #label
@@ -320,6 +364,26 @@ onMounted(async () => {
 }
 .time {
   color: #999;
+}
+/* 帖子卡片右上角：置顶标签 + 管理员置顶入口 */
+.pin-area {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pinned-badge {
+  font-size: 11px;
+  color: #fff;
+  background: #e6a23c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.4;
+}
+.pin-btn {
+  font-size: 12px;
+  padding: 0;
 }
 .post-title {
   font-size: 18px;

@@ -126,6 +126,17 @@ public class AuthController {
             int val = ("true".equalsIgnoreCase(v) || "1".equals(v)) ? 1 : 0;
             userDao.updateHideFavorites(userId, val);
         }
+        // nickname：可选，部分更新；昵称可重复不查重，非空、按字符数（含 emoji）限 32
+        if (body != null && body.containsKey("nickname")) {
+            String nickname = body.get("nickname") == null ? "" : body.get("nickname").trim();
+            if (nickname.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "昵称不能为空。"));
+            }
+            if (nickname.codePointCount(0, nickname.length()) > 32) {
+                return ResponseEntity.badRequest().body(Map.of("error", "昵称最长 32 个字符。"));
+            }
+            userDao.updateNickname(userId, nickname);
+        }
         User user = userDao.findById(userId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
         return ResponseEntity.ok(user);
     }

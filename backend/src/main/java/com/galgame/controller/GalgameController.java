@@ -41,8 +41,12 @@ import com.galgame.model.User;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
- * Galgame 作品库接口：列表/详情公开，添加/图片上传/删除需管理员权限。
- * <p>该路径未注册到鉴权拦截器，受限接口在此手动解析 token 判定管理员（参照 PostController）。
+ * Galgame 作品库接口：公开列表/详情只显示已上架（approved）；提交审核由普通登录用户发起（pending）。
+ * <p>该路径未注册到鉴权拦截器，受限接口在此手动解析 token 判定权限（参照 PostController）。
+ * <p>权限矩阵：列表公开（仅 approved）；详情 pending/rejected 仅创建者或管理员可见；
+ * 创建/封面上传任意登录用户（管理员建即 approved，普通用户建 pending）；
+ * 编辑管理员可编辑一切、创建者可编辑自己 pending/rejected 提交；删除管理员可删一切、创建者可删自己 pending 提交；
+ * 评分仅 approved 可评；审核接口与待审列表仅管理员。
  */
 @RestController
 @RequestMapping("/api/galgames")
@@ -69,6 +73,10 @@ public class GalgameController {
                                  List<Galgame.Link> links, List<String> tags) {
     }
 
+    /** 审核请求体：status 必填（approved 通过 / rejected 拒绝）；reason 仅 rejected 时必填（≤500 字） */
+    public record ReviewRequest(String status, String reason) {
+    }
+
     /** 1. 作品列表（公开），?q= 名称模糊、?tags= 多标签（逗号分隔或重复参数，AND 语义）、?sort= 排序（created 默认/views/release_date/rating），均可选 */
     @GetMapping
     public ResponseEntity<Object> list(
@@ -78,49 +86,75 @@ public class GalgameController {
         return ResponseEntity.ok(galgameDao.findAll(trimToNull(q), tags, sort));
     }
 
-    /** 2. 作品详情（公开）：访问 +1 浏览数，返回最新 view_count；带登录态时附 rated（当前用户是否已评分） */
+    /**
+     * 2. 作品详情：approved 公开（访问 +1 浏览数，返回最新 view_count）；
+     * pending/rejected 仅创建者或管理员可见（不 +1 浏览数），其它人一律 404；
+     * 带登录态时附 rated（当前用户是否已评分）。
+     */
     @GetMapping("/{id}")
     public ResponseEntity<Object> getById(@PathVariable Long id, HttpServletRequest request) {
         Optional<Galgame> opt = galgameDao.findById(id);
         if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
         }
-        galgameDao.incrementView(id);
-        Galgame saved = galgameDao.findById(id)
-                .orElseThrow(() -> new IllegalStateException("浏览计数后的 galgame 读取失败"));
+        Galgame galgame = opt.get();
+        boolean isApproved = "approved".equals(galgame.status());
+        if (!isApproved) {
+            User user = currentUser(request);
+            boolean isCreator = user != null && galgame.createdBy() != null && galgame.createdBy().equals(user.id());
+            if (!isCreator && !isAdmin(user)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+            }
+        } else {
+            galgameDao.incrementView(id);
+            galgame = galgameDao.findById(id)
+                    .orElseThrow(() -> new IllegalStateException("浏览计数后的 galgame 读取失败"));
+        }
         boolean rated = false;
         Optional<Long> uid = currentUserId(request);
         if (uid.isPresent()) {
             rated = galgameDao.hasRated(id, uid.get());
         }
         // convertValue 按全局 SNAKE_CASE 序列化 record → snake_case 键（release_date / rating_avg / rating_count），再附 rated
-        Map<String, Object> map = objectMapper.convertValue(saved, new TypeReference<Map<String, Object>>() {});
+        Map<String, Object> map = objectMapper.convertValue(galgame, new TypeReference<Map<String, Object>>() {});
         map.put("rated", rated);
         return ResponseEntity.ok(map);
     }
 
-    /** 3. 添加作品（管理员，JSON body） */
+    /**
+     * 3. 提交作品（任意登录用户，JSON body）：管理员提交直接上架（status=approved），
+     * 普通用户提交进入待审核（status=pending）。
+     */
     @PostMapping
     public ResponseEntity<Object> create(@RequestBody(required = false) GalgameRequest body,
                                          HttpServletRequest request) {
-        ResponseEntity<Object> gate = adminGate(request);
-        if (gate != null) {
-            return gate;
+        User user = currentUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
         }
-        long adminId = currentUserId(request).orElseThrow();
-        return doCreate(body, adminId);
+        String status = isAdmin(user) ? "approved" : "pending";
+        return doCreate(body, user.id(), status);
     }
 
-    /** 4. 更新作品（管理员，JSON body 全量替换） */
+    /**
+     * 4. 更新作品（登录，JSON body 全量替换）：管理员可编辑一切；创建者且 status != approved 可编辑自己提交；
+     * 其余 403。update() 不碰 status 列 → 编辑 pending 仍 pending、编辑 approved 仍 approved。
+     */
     @PutMapping("/{id}")
     public ResponseEntity<Object> update(@PathVariable Long id, @RequestBody(required = false) GalgameRequest body,
                                          HttpServletRequest request) {
-        ResponseEntity<Object> gate = adminGate(request);
-        if (gate != null) {
-            return gate;
+        User user = currentUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
         }
-        if (!galgameDao.existsById(id)) {
+        Optional<Galgame> opt = galgameDao.findById(id);
+        if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+        }
+        Galgame galgame = opt.get();
+        boolean isCreator = galgame.createdBy() != null && galgame.createdBy().equals(user.id());
+        if (!isAdmin(user) && !(isCreator && !"approved".equals(galgame.status()))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "没有权限。"));
         }
         ValidationResult result = normalizeAndValidate(body);
         if (result.error() != null) {
@@ -136,13 +170,13 @@ public class GalgameController {
         return ResponseEntity.ok(saved);
     }
 
-    /** 5. 上传封面图（管理员，multipart 字段 file），返回 {url: "/uploads/galgame_images/<stored>"} */
+    /** 5. 上传封面图（任意登录用户，multipart 字段 file），返回 {url: "/uploads/galgame_images/<stored>"} */
     @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Object> uploadImage(@RequestParam("file") MultipartFile file,
                                               HttpServletRequest request) {
-        ResponseEntity<Object> gate = adminGate(request);
-        if (gate != null) {
-            return gate;
+        User user = currentUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
         }
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "请上传图片文件。"));
@@ -168,15 +202,23 @@ public class GalgameController {
         }
     }
 
-    /** 6. 删除作品（管理员） */
+    /**
+     * 6. 删除作品（登录）：管理员可删一切；创建者且 status='pending' 可删自己提交；其余 403。
+     */
     @DeleteMapping("/{id}")
     public ResponseEntity<Object> delete(@PathVariable Long id, HttpServletRequest request) {
-        ResponseEntity<Object> gate = adminGate(request);
-        if (gate != null) {
-            return gate;
+        User user = currentUser(request);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
         }
-        if (!galgameDao.existsById(id)) {
+        Optional<Galgame> opt = galgameDao.findById(id);
+        if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+        }
+        Galgame galgame = opt.get();
+        boolean isCreator = galgame.createdBy() != null && galgame.createdBy().equals(user.id());
+        if (!isAdmin(user) && !(isCreator && "pending".equals(galgame.status()))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "没有权限。"));
         }
         galgameDao.deleteById(id);
         return ResponseEntity.ok(Map.of("ok", true));
@@ -191,8 +233,12 @@ public class GalgameController {
         if (uid.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
         }
-        if (!galgameDao.existsById(id)) {
+        Optional<Galgame> opt = galgameDao.findById(id);
+        if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+        }
+        if (!"approved".equals(opt.get().status())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "该条目尚未通过审核，不能评分。"));
         }
         Double score = body == null ? null : asDouble(body.get("score"));
         if (score == null) {
@@ -210,16 +256,106 @@ public class GalgameController {
         return ResponseEntity.ok(saved);
     }
 
+    /**
+     * 8. 待审核列表（管理员）：返回 status='pending' 的 galgame（含提交人昵称 creator）。
+     * ⚠️ Spring 精确路径 /pending 优先于 /{id} 模板，不冲突。
+     */
+    @GetMapping("/pending")
+    public ResponseEntity<Object> pending(HttpServletRequest request) {
+        ResponseEntity<Object> gate = adminGate(request);
+        if (gate != null) {
+            return gate;
+        }
+        return ResponseEntity.ok(galgameDao.findPending());
+    }
+
+    /**
+     * 8.5 「我的提交」（登录）：返回当前用户创建的全部 galgame（含各审核状态，status/reject_reason 一并返回），
+     * 提交者在「我的提交」页回看 / 点进详情编辑自己 pending/rejected 的提交。未登录 401。
+     */
+    @GetMapping("/mine")
+    public ResponseEntity<Object> mine(HttpServletRequest request) {
+        Optional<Long> uid = currentUserId(request);
+        if (uid.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
+        }
+        return ResponseEntity.ok(galgameDao.findByCreator(uid.get()));
+    }
+
+    /**
+     * 9. 审核（管理员）：body {status:'approved'|'rejected', reason?}；
+     * rejected 时 reason 必填（trim 非空且 ≤500，否则 400「请填写拒绝理由。」）；
+     * 调 updateStatus 落库，返回更新后的记录。
+     */
+    @PostMapping("/{id}/review")
+    public ResponseEntity<Object> review(@PathVariable Long id,
+                                         @RequestBody(required = false) ReviewRequest body,
+                                         HttpServletRequest request) {
+        ResponseEntity<Object> gate = adminGate(request);
+        if (gate != null) {
+            return gate;
+        }
+        if (!galgameDao.existsById(id)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Galgame 不存在。"));
+        }
+        String status = body == null ? null : trimToNull(body.status());
+        if (!"approved".equals(status) && !"rejected".equals(status)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "审核状态须为 approved 或 rejected。"));
+        }
+        String reason = body == null ? null : trimToNull(body.reason());
+        if ("rejected".equals(status)) {
+            if (reason == null || reason.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "请填写拒绝理由。"));
+            }
+            if (reason.length() > 500) {
+                return ResponseEntity.badRequest().body(Map.of("error", "拒绝理由不能超过 500 字。"));
+            }
+        }
+        galgameDao.updateStatus(id, status, reason);
+        // 从 DB 回查，返回最新 status / reject_reason / reviewed_at
+        Galgame saved = galgameDao.findById(id)
+                .orElseThrow(() -> new IllegalStateException("审核后的 galgame 读取失败"));
+        // 萌点：审核通过进入公共列表时给提交者 +10（尽力而为，失败不阻断审核）。
+        // claimMoeAward 原子防重——每条 galgame 只发一次，反复通过/拒绝不会重复加分
+        int moeGranted = 0;
+        if ("approved".equals(status) && saved.createdBy() != null && galgameDao.claimMoeAward(id)) {
+            try {
+                userDao.adjustMoePoints(saved.createdBy(), 10);
+                // 提交者恰为当前操作者（管理员审核自己的提交）时，前端据此显示「+10萌点」
+                Optional<Long> uid = currentUserId(request);
+                if (uid.isPresent() && uid.get().longValue() == saved.createdBy().longValue()) {
+                    moeGranted = 10;
+                }
+            } catch (Exception ignored) {
+                // 萌点奖励异常不阻断审核主流程
+            }
+        }
+        Map<String, Object> map = objectMapper.convertValue(saved, new TypeReference<Map<String, Object>>() {});
+        map.put("moe_granted", moeGranted);
+        return ResponseEntity.ok(map);
+    }
+
     // ── 私有辅助 ─────────────────────────────
 
-    private ResponseEntity<Object> doCreate(GalgameRequest body, long adminId) {
+    private ResponseEntity<Object> doCreate(GalgameRequest body, long userId, String status) {
         ValidationResult result = normalizeAndValidate(body);
         if (result.error() != null) {
             return result.error();
         }
         NormalizedGalgameRequest n = result.value();
-        Long galgameId = galgameDao.insert(n.name(), n.description(), n.image(), n.staff(), n.releaseDate(), n.links(), n.tags(), adminId);
-        // 从 DB 回查，保证 created_at / updated_at / id 为数据库真实值
+        Long galgameId = galgameDao.insert(n.name(), n.description(), n.image(), n.staff(), n.releaseDate(), n.links(), n.tags(), userId, status);
+        // 管理员直接上架（status=approved）即进入公共列表：给提交者 +10 萌点
+        // （claimMoeAward 原子置位，每条只奖一次；尽力而为，失败不阻断提交）
+        if ("approved".equals(status)) {
+            try {
+                if (galgameDao.claimMoeAward(galgameId)) {
+                    userDao.adjustMoePoints(userId, 10);
+                }
+            } catch (Exception ignored) {
+                // 萌点奖励异常不阻断提交主流程
+            }
+        }
+        // 从 DB 回查，保证 created_at / updated_at / id / status 为数据库真实值
         Galgame saved = galgameDao.findById(galgameId)
                 .orElseThrow(() -> new IllegalStateException("写入的 galgame 读取失败"));
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
@@ -306,6 +442,20 @@ public class GalgameController {
 
     private Optional<Long> currentUserId(HttpServletRequest request) {
         return tokenService.resolveUserId(request.getHeader("Authorization"));
+    }
+
+    /** 当前登录用户实体；未登录 / token 无效 / 用户不存在返回 null */
+    private User currentUser(HttpServletRequest request) {
+        Optional<Long> uid = currentUserId(request);
+        if (uid.isEmpty()) {
+            return null;
+        }
+        return userDao.findById(uid.get()).orElse(null);
+    }
+
+    /** 是否管理员：登录且 admin_level > 0（null 视为非管理员） */
+    private boolean isAdmin(User user) {
+        return user != null && user.adminLevel() != null && user.adminLevel() > 0;
     }
 
     private String detectImageExt(MultipartFile file) {

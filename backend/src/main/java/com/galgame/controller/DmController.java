@@ -1,5 +1,6 @@
 package com.galgame.controller;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -108,7 +109,35 @@ public class DmController {
                 "blocked_by_me", blockedByMe, "blocked_by_them", blockedByThem));
     }
 
-    /** 3. 发消息 */
+    /** 3.1 撤回消息（仅发送者本人）：置 is_recalled=true，已读不做。401 未登录 / 403 非发送者 / 404 不存在 */
+    @PostMapping("/messages/{id}/recall")
+    public ResponseEntity<Object> recallMessage(@PathVariable Long id, HttpServletRequest request) {
+        Optional<Long> uidOpt = requireLogin(request);
+        if (uidOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "请先登录。"));
+        }
+        long me = uidOpt.get();
+        Optional<DmMessage> opt = dmDao.findMessageById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "消息不存在。"));
+        }
+        DmMessage message = opt.get();
+        if (message.senderId() != me) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "只能撤回自己发送的消息。"));
+        }
+        if (message.isRecalled()) {
+            // 已撤回：幂等返回当前消息，不因超时再报错（按钮已隐藏，正常流程不会触发）
+            return ResponseEntity.ok(message);
+        }
+        // 发送超过两分钟不可撤回（前端按 created_at 隐藏按钮，这里后端硬校验兜底）
+        if (message.createdAt().isBefore(LocalDateTime.now().minusMinutes(2))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "发送超过两分钟，无法撤回。"));
+        }
+        DmMessage updated = dmDao.recallMessage(id, me).orElse(message);
+        return ResponseEntity.ok(updated);
+    }
+
+    /** 4. 发消息 */
     @PostMapping("/conversations/{userId}/messages")
     public ResponseEntity<Object> sendMessage(@PathVariable Long userId,
                                               @RequestBody(required = false) Map<String, String> body,

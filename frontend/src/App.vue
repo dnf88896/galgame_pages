@@ -25,7 +25,7 @@
             <router-link :to="`/user/${user.id}`" class="nav-user">
               <el-avatar v-if="user.avatar_url" :src="avatarSrc" :size="28" />
               <el-avatar v-else :size="28" class="nav-avatar-text">{{ firstChar }}</el-avatar>
-              <span class="nav-username">{{ user.username }}</span>
+              <span class="nav-username">{{ user.nickname || user.username }}</span>
             </router-link>
             <el-button link type="danger" :loading="loggingOut" @click="logout">退出</el-button>
           </template>
@@ -36,6 +36,9 @@
       <router-view />
     </main>
     <SettingsPanel v-model="settingsOpen" />
+
+    <!-- 萌点获得提示：屏幕中心「+n萌点」淡出 -->
+    <MoeToast />
 
     <!-- 封禁锁屏：固定全屏覆盖，唯一操作是退出登录 -->
     <div v-if="banned" class="ban-overlay">
@@ -57,6 +60,8 @@ import { token, user, setUser, clearToken } from './store/user'
 import { unreadRefreshKey } from './store/unread'
 import { resolveAssetUrl } from './utils/format'
 import SettingsPanel from './components/SettingsPanel.vue'
+import MoeToast from './components/MoeToast.vue'
+import { refreshMoe } from './utils/moeGain'
 
 const router = useRouter()
 
@@ -65,7 +70,7 @@ const settingsOpen = ref(false)
 
 const loggedIn = computed(() => !!token.value && !!user.value)
 const avatarSrc = computed(() => resolveAssetUrl(user.value?.avatar_url))
-const firstChar = computed(() => (user.value?.username || '?').slice(0, 1).toUpperCase())
+const firstChar = computed(() => (user.value?.nickname || user.value?.username || '?').slice(0, 1).toUpperCase())
 
 // 封禁判断：ban_until 存在且未过期
 const banned = computed(() => {
@@ -109,7 +114,11 @@ async function refreshUser() {
   if (!loggedIn.value) return
   try {
     const { data } = await api.get('/auth/me')
-    if (data && data.id) setUser(data)
+    if (data && data.id) {
+      setUser(data)
+      // 建立/更新萌点基线（首次不提示避免历史萌点误报；之后加分点靠 refreshMoe 检测增量弹「+n萌点」）
+      refreshMoe(data?.moe_points)
+    }
   } catch {
     // 401 由 api 拦截器统一处理；其他错误静默
   }

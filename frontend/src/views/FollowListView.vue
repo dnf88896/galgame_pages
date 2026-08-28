@@ -25,11 +25,11 @@
         <router-link :to="`/user/${u.id}`" class="user-avatar">
           <el-avatar v-if="u.avatar_url" :src="resolveAssetUrl(u.avatar_url)" :size="40" />
           <el-avatar v-else :size="40" class="avatar-text">{{
-            (u.username || '?').slice(0, 1).toUpperCase()
+            (u.nickname || u.username || '?').slice(0, 1).toUpperCase()
           }}</el-avatar>
         </router-link>
         <div class="user-info">
-          <router-link :to="`/user/${u.id}`" class="user-name">{{ u.username }}</router-link>
+          <router-link :to="`/user/${u.id}`" class="user-name">{{ u.nickname || u.username }}</router-link>
           <div v-if="u.bio" class="user-bio">{{ u.bio }}</div>
         </div>
         <el-button

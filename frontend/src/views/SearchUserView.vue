@@ -1,11 +1,11 @@
 <template>
   <div class="page search-user-page">
-    <el-page-header content="搜索用户" @back="$router.push('/')" />
+    <el-page-header content="搜索用户" @back="() => goBack(router)" />
 
     <div class="search-bar">
       <el-input
         v-model="keyword"
-        placeholder="输入用户名搜索…"
+        placeholder="输入用户名或昵称搜索…"
         clearable
         size="large"
         @keyup.enter="doSearch"
@@ -37,7 +37,7 @@
         <el-avatar v-else :size="40" class="user-avatar-text">{{ firstChar(u) }}</el-avatar>
         <div class="user-meta">
           <div class="user-name">
-            <span>{{ u.username }}</span>
+            <span>{{ u.nickname || u.username }}</span>
             <el-tag v-if="Number(u.admin_level) > 0" size="small" type="warning">管理员 Lv.{{ u.admin_level }}</el-tag>
             <el-tag v-if="u.ban_until && new Date(u.ban_until).getTime() > Date.now()" size="small" type="danger">已封禁</el-tag>
           </div>
@@ -52,9 +52,13 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { goBack } from '../utils/navigation'
 import { resolveAssetUrl, getErrorMessage } from '../utils/format'
+
+const router = useRouter()
 
 const keyword = ref('')
 const results = ref([])
@@ -62,7 +66,7 @@ const loading = ref(false)
 const searched = ref(false)
 
 function firstChar(u) {
-  return (u.username || '?').slice(0, 1).toUpperCase()
+  return (u.nickname || u.username || '?').slice(0, 1).toUpperCase()
 }
 
 async function doSearch() {

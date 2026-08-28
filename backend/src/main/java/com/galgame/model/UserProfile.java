@@ -7,14 +7,15 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * 用户公开资料（GET /api/users/{id}）。
- * <p>字段扁平化输出：id / username / avatar_url / bio / created_at / admin_level / post_count /
+ * <p>字段扁平化输出：id / username / nickname / avatar_url / bio / created_at / admin_level / post_count /
  * reply_count / received_likes / recent_posts[] / follower_count /
- * following_count / is_following / is_blocked / favorite_count / hide_favorites / ban_until。
+ * following_count / is_following / is_blocked / favorite_count / hide_favorites / moe_points / ban_until。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record UserProfile(
         Long id,
         String username,
+        String nickname,
         String avatarUrl,
         String bio,
         LocalDateTime createdAt,
@@ -29,5 +30,6 @@ public record UserProfile(
         boolean isBlocked,
         int favoriteCount,
         int hideFavorites,
+        int moePoints,
         LocalDateTime banUntil) {
 }

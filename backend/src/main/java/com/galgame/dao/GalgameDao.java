@@ -5,6 +5,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -34,6 +35,8 @@ public class GalgameDao {
 
     private static final String BASE_COLUMNS =
             "g.id, g.name, g.description, g.image, g.staff, g.view_count, g.release_date, g.rating_avg, g.rating_count, g.links, g.created_by, g.created_at, g.updated_at, "
+            + "g.status, g.reject_reason, g.reviewed_at, "
+            + "(SELECT COALESCE(nickname, username) FROM users u WHERE u.id = g.created_by) AS creator, "
             + "(SELECT GROUP_CONCAT(section_key ORDER BY section_key) FROM galgame_tags gt "
             + "WHERE gt.galgame_id = g.id) AS tags";
 
@@ -53,11 +56,11 @@ public class GalgameDao {
      */
     @Transactional
     public Long insert(String name, String description, String image, String staff, LocalDate releaseDate,
-                       List<Galgame.Link> links, List<String> tags, long createdBy) {
+                       List<Galgame.Link> links, List<String> tags, long createdBy, String status) {
         // Jackson 3 writeValueAsString 抛运行时异常，无需（也无法）捕获受检 IOException
         String linksJson = (links == null || links.isEmpty()) ? "[]" : objectMapper.writeValueAsString(links);
-        String sql = "INSERT INTO galgames (name, description, image, staff, release_date, links, created_by) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO galgames (name, description, image, staff, release_date, links, created_by, status) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
@@ -68,6 +71,7 @@ public class GalgameDao {
             ps.setDate(5, releaseDate == null ? null : java.sql.Date.valueOf(releaseDate));
             ps.setString(6, linksJson);
             ps.setLong(7, createdBy);
+            ps.setString(8, status);
             return ps;
         }, keyHolder);
         Long galgameId = keyHolder.getKey().longValue();
@@ -104,14 +108,17 @@ public class GalgameDao {
     }
 
     /**
-     * Galgame 列表。按条件动态拼接 WHERE：q 只按名称模糊匹配（作者/内容不搜）；
+     * Galgame 列表（公开，仅已上架）。固定过滤 status='approved'（pending/rejected 不进公开列表）；
+     * 其余按条件动态拼接 WHERE：q 只按名称模糊匹配（作者/内容不搜）；
      * tags 为 gg-* 资源筛选标签，AND 语义：每标签一条 EXISTS 判断，
      * 一作须同时拥有所有指定标签；均无条件则返回全部。
-     * sort 取值：views 按浏览数倒序；created（默认）按创建时间倒序（最新在上）；
-     * release_date / rating 尚未实现（无字段），接口预留，回退默认排序。
+     * sort 取值：created（默认）按创建时间倒序（最新在上）；
+     * views/views_asc 按浏览数倒序/升序；rating/rating_asc 按评分从高到低/从低到高；
+     * release_date_desc/release_date_asc 发售日期从新到旧/从旧到新
+     * （无发售日期 / 未评分的排最后）。
      */
     public List<Galgame> findAll(String q, List<String> tags, String sort) {
-        StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM galgames g WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM galgames g WHERE 1=1 AND g.status = 'approved'");
         List<Object> args = new ArrayList<>();
         if (q != null && !q.isBlank()) {
             sql.append(" AND g.name LIKE CONCAT('%',?,'%')");
@@ -129,10 +136,35 @@ public class GalgameDao {
         return jdbcTemplate.query(sql.toString(), GALGAME_ROW_MAPPER, args.toArray());
     }
 
-    /** 按排序值生成 ORDER BY 子句（含前置空格）；未知值回退创建时间倒序 */
+    /**
+     * 按排序值生成 ORDER BY 子句（含前置空格）；未知值回退创建时间倒序。
+     * rating / release_date 为 NULL（未评分 / 无发售日期）的一律排最后：
+     * 用 (col IS NULL) 做首键（false=0 在 true=1 前）。方向由前端控制
+     * （views/rating/release_date_desc 为倒序，*_asc 为升序）。
+     */
     private static String orderBy(String sort) {
         if ("views".equals(sort)) {
             return " ORDER BY g.view_count DESC, g.created_at DESC, g.id DESC";
+        }
+        if ("views_asc".equals(sort)) {
+            // 浏览数从低到高（view_count 非空默认 0，无需 NULL 处理）
+            return " ORDER BY g.view_count ASC, g.created_at DESC, g.id DESC";
+        }
+        if ("rating".equals(sort)) {
+            // 评分从高到低；同分按评分人数多者优先
+            return " ORDER BY (g.rating_avg IS NULL), g.rating_avg DESC, g.rating_count DESC, g.created_at DESC, g.id DESC";
+        }
+        if ("rating_asc".equals(sort)) {
+            // 评分从低到高；同分按评分人数少者优先
+            return " ORDER BY (g.rating_avg IS NULL), g.rating_avg ASC, g.rating_count ASC, g.created_at DESC, g.id DESC";
+        }
+        if ("release_date_desc".equals(sort)) {
+            // 发售日期从新到旧
+            return " ORDER BY (g.release_date IS NULL), g.release_date DESC, g.created_at DESC, g.id DESC";
+        }
+        if ("release_date_asc".equals(sort)) {
+            // 发售日期从旧到新
+            return " ORDER BY (g.release_date IS NULL), g.release_date ASC, g.created_at DESC, g.id DESC";
         }
         return " ORDER BY g.created_at DESC, g.id DESC";
     }
@@ -141,6 +173,33 @@ public class GalgameDao {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM galgames WHERE id = ?", Integer.class, id);
         return count != null && count > 0;
+    }
+
+    /** 待审核列表（管理员审核页）：仅 status='pending'，按提交时间倒序，含提交人昵称 creator */
+    public List<Galgame> findPending() {
+        return jdbcTemplate.query(
+                "SELECT " + BASE_COLUMNS + " FROM galgames g WHERE g.status = 'pending' ORDER BY g.created_at DESC",
+                GALGAME_ROW_MAPPER);
+    }
+
+    /** 「我的提交」：某个用户创建的全部 galgame（含各审核状态），按创建时间倒序（同秒按 id 倒序兜底），提交者回看/编辑入口 */
+    public List<Galgame> findByCreator(long userId) {
+        return jdbcTemplate.query(
+                "SELECT " + BASE_COLUMNS + " FROM galgames g WHERE g.created_by = ? ORDER BY g.created_at DESC, g.id DESC",
+                GALGAME_ROW_MAPPER, userId);
+    }
+
+    /** 审核更新：设置 status 与拒绝理由，reviewed_at 刷新为当前时间（轻量，不动 tags/links） */
+    public boolean updateStatus(long id, String status, String rejectReason) {
+        return jdbcTemplate.update(
+                "UPDATE galgames SET status = ?, reject_reason = ?, reviewed_at = NOW() WHERE id = ?",
+                status, rejectReason, id) > 0;
+    }
+
+    /** 审核通过萌点奖励防重：置位 moe_awarded=1，仅当原先为 0（未发放）时返回 true（原子，防并发/反复审核重复发放） */
+    public boolean claimMoeAward(long id) {
+        return jdbcTemplate.update(
+                "UPDATE galgames SET moe_awarded = 1 WHERE id = ? AND moe_awarded = 0", id) > 0;
     }
 
     /** 浏览数 +1（详情页访问时调用） */
@@ -216,7 +275,11 @@ public class GalgameDao {
                 rs.getLong("view_count"),
                 rs.getDate("release_date") == null ? null : rs.getDate("release_date").toLocalDate(),
                 nullableDouble(rs, "rating_avg"),
-                rs.getLong("rating_count"));
+                rs.getLong("rating_count"),
+                rs.getString("status"),
+                rs.getString("reject_reason"),
+                nullableTimestamp(rs, "reviewed_at"),
+                rs.getString("creator"));
     }
 
     /** 反序列化 links JSON 文本为 List<Link>；null / 空 / 解析失败一律回退空列表 */
@@ -252,5 +315,10 @@ public class GalgameDao {
     private static Double nullableDouble(ResultSet rs, String column) throws SQLException {
         double value = rs.getDouble(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private static LocalDateTime nullableTimestamp(ResultSet rs, String column) throws SQLException {
+        java.sql.Timestamp ts = rs.getTimestamp(column);
+        return ts == null ? null : ts.toLocalDateTime();
     }
 }

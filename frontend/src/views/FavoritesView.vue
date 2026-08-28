@@ -37,6 +37,7 @@
           <span class="author">{{ p.author }}</span>
           <span class="dot">·</span>
           <span class="time">{{ formatTime(p.created_at) }}</span>
+          <span v-if="isPinned(p)" class="pinned-badge">置顶</span>
         </div>
         <div class="fav-item-body">
           <div class="fav-item-main">
@@ -66,7 +67,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
-import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage } from '../utils/format'
+import { fetchTagStructure, sectionLabel, formatTime, getErrorMessage, isPinned } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -94,7 +95,7 @@ function tagLabel(k) {
 const isSelf = computed(() => !!user.value && Number(user.value.id) === Number(userId.value))
 const title = computed(() => {
   if (isSelf.value) return '我的收藏'
-  return `${profile.value?.username || 'TA'} 的收藏`
+  return `${profile.value?.nickname || profile.value?.username || 'TA'} 的收藏`
 })
 
 // 正在取消收藏的帖子 id 集合（用于按钮 loading）
@@ -219,6 +220,15 @@ onMounted(() => {
 }
 .time {
   color: #999;
+}
+/* 置顶帖子标签 */
+.pinned-badge {
+  font-size: 11px;
+  color: #fff;
+  background: #e6a23c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.4;
 }
 .fav-item-body {
   display: flex;

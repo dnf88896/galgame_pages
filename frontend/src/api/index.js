@@ -2,9 +2,10 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { getToken, clearToken } from '../store/user'
 
-// 后端 API 地址（Spring Boot 默认 8080）
+// 后端 API 地址：优先用构建时环境变量 VITE_API_BASE；未设置时默认相对路径 /api（线上由 Nginx 同源反代）
+// 本地开发见 frontend/.env.development（VITE_API_BASE=http://localhost:8080/api）
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: import.meta.env.VITE_API_BASE || '/api',
   timeout: 10000,
 })
 

@@ -22,7 +22,7 @@ import com.galgame.model.DmMessage;
 public class DmDao {
 
     private static final String MESSAGE_COLUMNS =
-            "id, conversation_id, sender_id, content, is_read, created_at";
+            "id, conversation_id, sender_id, content, is_read, is_recalled, created_at";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -32,7 +32,8 @@ public class DmDao {
                     rs.getLong("sender_id"),
                     rs.getString("content"),
                     rs.getTimestamp("created_at").toLocalDateTime(),
-                    rs.getBoolean("is_read"));
+                    rs.getBoolean("is_read"),
+                    rs.getBoolean("is_recalled"));
 
     /** 会话引用：conversationId 与对方用户 id */
     public record ConversationRef(Long conversationId, Long otherId) {
@@ -124,5 +125,16 @@ public class DmDao {
         jdbcTemplate.update(
                 "UPDATE dm_messages SET is_read = 1 WHERE conversation_id = ? AND is_read = 0 AND sender_id <> ?",
                 conversationId, viewerId);
+    }
+
+    /**
+     * 撤回消息：置 is_recalled = 1。幂等（已撤回再次调用也成功返回当前消息）。
+     * 调用方须先 findMessageById 校验存在 + sender_id 归属后再调用。
+     */
+    public Optional<DmMessage> recallMessage(long messageId, long senderId) {
+        jdbcTemplate.update(
+                "UPDATE dm_messages SET is_recalled = 1 WHERE id = ? AND sender_id = ?",
+                messageId, senderId);
+        return findMessageById(messageId);
     }
 }

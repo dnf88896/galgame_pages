@@ -116,9 +116,27 @@
             </span>
             <span class="dot">·</span>
             <span class="time">{{ formatTime(p.created_at) }}</span>
+            <span class="pin-area">
+              <span v-if="isPinned(p)" class="pinned-badge">置顶</span>
+              <el-button
+                v-if="isAdminUser"
+                link
+                type="warning"
+                size="small"
+                class="pin-btn"
+                @click="togglePin(p)"
+              >{{ isPinned(p) ? '取消置顶' : '置顶' }}</el-button>
+            </span>
           </div>
           <h2 class="post-title" @click="goPost(p.id)">{{ p.title }}</h2>
           <p class="excerpt">{{ p.content }}</p>
+          <img
+            v-if="p.cover_image"
+            :src="resolveAssetUrl(p.cover_image)"
+            class="post-cover-thumb"
+            alt="封面"
+            @click="goPost(p.id)"
+          />
           <AttachmentList :attachments="p.attachments" />
           <div class="post-bottom">
             <span class="stat-chip">回复 {{ p.reply_count }}</span>
@@ -151,6 +169,19 @@
             show-word-limit
             placeholder="公告内容，将通知到所有用户"
           />
+          <div class="ann-emoji-bar">
+            <el-button
+              class="emoji-toggle"
+              :class="{ active: annEmojiVisible }"
+              type="text"
+              @click="annEmojiVisible = !annEmojiVisible"
+            >😀 表情</el-button>
+            <EmojiPicker
+              v-if="annEmojiVisible"
+              class="ann-emoji-picker"
+              @pick="onAnnEmoji"
+            />
+          </div>
         </el-form-item>
         <el-form-item label="媒体附件（图片/音频/视频，可选）">
           <input type="file" multiple accept="image/*,audio/*,video/*" @change="onAnnFileChange" />
@@ -172,11 +203,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
 import AttachmentList from '../components/AttachmentList.vue'
-import { categories, categoryDescriptions, fetchTagStructure, sectionLabel, formatTime, isToday, getErrorMessage } from '../utils/format'
+import EmojiPicker from '../components/EmojiPicker.vue'
+import { categories, categoryDescriptions, fetchTagStructure, sectionLabel, formatTime, isToday, getErrorMessage, resolveAssetUrl, isPinned } from '../utils/format'
 
 const router = useRouter()
 
@@ -344,6 +376,38 @@ function goPost(id) {
   router.push(`/post/${id}`)
 }
 
+// 管理员才能看到帖子置顶/取消置顶入口
+const isAdminUser = computed(() => !!user.value && Number(user.value.admin_level) > 0)
+
+// 置顶/取消置顶：未置顶弹窗输入天数（正整数），已置顶确认后取消；成功后刷新列表
+async function togglePin(p) {
+  if (isPinned(p)) {
+    try {
+      await ElMessageBox.confirm('取消该帖的置顶？', '取消置顶', { type: 'warning' })
+      await api.put(`/posts/${p.id}/pin`, { days: 0 })
+      ElMessage.success('已取消置顶')
+      await load()
+    } catch (e) {
+      if (typeof e === 'string') return // 用户取消弹窗
+      ElMessage.error(getErrorMessage(e, '操作失败'))
+    }
+    return
+  }
+  try {
+    const { value } = await ElMessageBox.prompt('请输入置顶天数', '置顶帖子', {
+      inputPattern: /^[1-9]\d*$/,
+      inputErrorMessage: '请输入正整数天数',
+      inputValue: '1',
+    })
+    await api.put(`/posts/${p.id}/pin`, { days: Number(value) })
+    ElMessage.success('已置顶')
+    await load()
+  } catch (e) {
+    if (typeof e === 'string') return // 用户取消弹窗
+    ElMessage.error(getErrorMessage(e, '操作失败'))
+  }
+}
+
 // 顶部「发布话题」入口：跳转到独立发帖页
 function goCompose() {
   router.push('/compose')
@@ -370,6 +434,13 @@ const annSubmitting = ref(false)
 const annForm = reactive({ title: '', content: '' })
 // 公告媒体附件：本地 File 列表（可多选，图片/音频/视频）
 const annFiles = ref([])
+
+// 公告正文 emoji 面板显隐；点选追加到正文末尾
+const annEmojiVisible = ref(false)
+
+function onAnnEmoji(e) {
+  annForm.content += e
+}
 
 // 收集选中的附件文件；清空 input 的 value 允许重复选同一文件
 function onAnnFileChange(e) {
@@ -537,6 +608,26 @@ onMounted(() => {
 .time {
   color: #999;
 }
+/* 帖子卡片右上角：置顶标签 + 管理员置顶入口 */
+.pin-area {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pinned-badge {
+  font-size: 11px;
+  color: #fff;
+  background: #e6a23c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.4;
+}
+.pin-btn {
+  font-size: 12px;
+  padding: 0;
+}
 .post-title {
   font-size: 18px;
   margin: 0 0 8px;
@@ -554,6 +645,15 @@ onMounted(() => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* 帖子卡片封面缩略图：宽度撑满卡片，高度自适应，整图完整显示不裁剪 */
+.post-cover-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 0 0 12px;
+  cursor: pointer;
 }
 .post-bottom {
   display: flex;
@@ -803,5 +903,20 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 公告正文 emoji 开关 + 面板 */
+.ann-emoji-bar {
+  margin-top: 8px;
+}
+.ann-emoji-picker {
+  margin-top: 8px;
+}
+.emoji-toggle {
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.emoji-toggle.active {
+  color: #409eff;
 }
 </style>

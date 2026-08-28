@@ -5,12 +5,14 @@
 CREATE TABLE IF NOT EXISTS users (
     id            BIGINT       NOT NULL AUTO_INCREMENT,
     username      VARCHAR(32)  NOT NULL,
+    nickname      VARCHAR(32)  NULL COMMENT '用户昵称，初始=账号名，可重复',
     password_hash VARCHAR(100) NOT NULL,
     avatar_url    VARCHAR(500) NULL,
     bio           VARCHAR(200) NULL,
     admin_level   INT          NOT NULL DEFAULT 0 COMMENT '管理员权限等级，0=普通用户，1+ 由管理员密码认证授予',
     hide_favorites TINYINT     NOT NULL DEFAULT 0 COMMENT '是否隐藏收藏夹（0=公开，1=仅自己可见）',
     ban_until      DATETIME     NULL COMMENT '封禁截止时间，NULL=未封禁，2099-12-31 23:59:59=永久封禁；过期自动视为解封',
+    moe_points    INT          NOT NULL DEFAULT 0 COMMENT '萌点(积分)：每日签到/发帖/评论奖励，暂只增不消耗',
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uk_users_username (username)
@@ -39,6 +41,9 @@ CREATE TABLE IF NOT EXISTS posts (
     reply_count INT          NOT NULL DEFAULT 0,
     view_count  INT          NOT NULL DEFAULT 0,
     like_count  INT          NOT NULL DEFAULT 0,
+    dislike_count INT        NOT NULL DEFAULT 0 COMMENT '点踩数（与点赞独立，不互斥）',
+    cover_image   VARCHAR(500) NULL COMMENT '封面图 URL',
+    pinned_until  DATETIME     NULL COMMENT '置顶截止时间，NULL=未置顶，过期自动视为不置顶',
     PRIMARY KEY (id),
     KEY idx_posts_user_id (user_id),
     CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
@@ -62,8 +67,10 @@ CREATE TABLE IF NOT EXISTS replies (
     content     TEXT         NOT NULL,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     like_count  INT          NOT NULL DEFAULT 0,
+    dislike_count INT        NOT NULL DEFAULT 0 COMMENT '点踩数（与点赞独立，不互斥）',
     parent_id   BIGINT       NULL,
     parent_author VARCHAR(32) NULL COMMENT '父回复作者名快照：父评论删除后子回复仍能显示「回复 @xx」引用',
+    is_pinned   TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '评论置顶标记（发帖人或管理员设置）',
     PRIMARY KEY (id),
     KEY idx_replies_post_id (post_id),
     KEY idx_replies_user_id (user_id),
@@ -85,6 +92,16 @@ CREATE TABLE IF NOT EXISTS post_likes (
     CONSTRAINT fk_post_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- 点踩表：与点赞独立（同一用户可同时赞和踩），结构同 post_likes。
+CREATE TABLE IF NOT EXISTS post_dislikes (
+    post_id     BIGINT       NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (post_id, user_id),
+    CONSTRAINT fk_post_dislikes_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE,
+    CONSTRAINT fk_post_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS reply_likes (
     reply_id    BIGINT       NOT NULL,
     user_id     BIGINT       NOT NULL,
@@ -92,6 +109,16 @@ CREATE TABLE IF NOT EXISTS reply_likes (
     PRIMARY KEY (reply_id, user_id),
     CONSTRAINT fk_reply_likes_reply FOREIGN KEY (reply_id) REFERENCES replies (id) ON DELETE CASCADE,
     CONSTRAINT fk_reply_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 回复点踩表：与点赞独立，结构同 reply_likes。
+CREATE TABLE IF NOT EXISTS reply_dislikes (
+    reply_id    BIGINT       NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (reply_id, user_id),
+    CONSTRAINT fk_reply_dislikes_reply FOREIGN KEY (reply_id) REFERENCES replies (id) ON DELETE CASCADE,
+    CONSTRAINT fk_reply_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -138,6 +165,7 @@ CREATE TABLE IF NOT EXISTS dm_messages (
     sender_id       BIGINT        NOT NULL,
     content         VARCHAR(2000) NOT NULL,
     is_read         TINYINT(1)    NOT NULL DEFAULT 0,
+    is_recalled     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否已撤回（内容保留，前端显示"已撤回"）',
     created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_dm_messages_conv (conversation_id, id),
@@ -194,6 +222,10 @@ CREATE TABLE IF NOT EXISTS galgames (
     created_by  BIGINT       NULL,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'approved' COMMENT '状态：approved已上架/pending待审核/rejected已拒绝',
+    reject_reason VARCHAR(500) NULL COMMENT '拒绝理由',
+    reviewed_at DATETIME     NULL COMMENT '审核时间',
+    moe_awarded TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '审核通过萌点奖励是否已发放（每条只奖一次）',
     PRIMARY KEY (id),
     KEY idx_galgames_name (name),
     CONSTRAINT fk_galgames_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
@@ -248,4 +280,71 @@ CREATE TABLE IF NOT EXISTS reports (
     KEY idx_reports_target (target_type, target_id),
     KEY idx_reports_status (status, id),
     CONSTRAINT fk_reports_user FOREIGN KEY (reporter_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 帖子投票：每帖最多 30 个（kungal 一致），仅楼主可建/编/删，所有登录用户可投。
+-- user_id 用 CASCADE：用户删号时其投票一并删除（投票归属随用户）。
+CREATE TABLE IF NOT EXISTS polls (
+    id                BIGINT       NOT NULL AUTO_INCREMENT,
+    title             VARCHAR(100) NOT NULL,
+    description       VARCHAR(500) NOT NULL DEFAULT '',
+    type              VARCHAR(10)  NOT NULL DEFAULT 'single' COMMENT 'single=单选 / multiple=多选',
+    min_choice        INT          NOT NULL DEFAULT 1 COMMENT '多选时至少选择数',
+    max_choice        INT          NOT NULL DEFAULT 1 COMMENT '多选时至多选择数',
+    deadline          DATETIME     NULL COMMENT '截止时间，NULL=长期开放',
+    status            VARCHAR(10)  NOT NULL DEFAULT 'open' COMMENT 'open=进行中 / closed=已关闭',
+    result_visibility VARCHAR(20)  NOT NULL DEFAULT 'always' COMMENT 'always=所有人可见 / after_vote=投票后可见 / after_deadline=截止后可见',
+    is_anonymous      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '匿名投票：不显示投票人身份',
+    can_change_vote   TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '允许修改投票',
+    post_id           BIGINT       NOT NULL,
+    user_id           BIGINT       NOT NULL COMMENT '创建人（楼主）',
+    created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_polls_post_id (post_id),
+    KEY idx_polls_user_id (user_id),
+    CONSTRAINT fk_polls_post FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE,
+    CONSTRAINT fk_polls_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 投票选项：vote_count 为冗余计数（与 poll_votes 行数保持一致，事务内增减）。
+CREATE TABLE IF NOT EXISTS poll_options (
+    id         BIGINT       NOT NULL AUTO_INCREMENT,
+    text       VARCHAR(100) NOT NULL,
+    poll_id    BIGINT       NOT NULL,
+    vote_count INT          NOT NULL DEFAULT 0,
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_poll_options_poll (poll_id),
+    CONSTRAINT fk_poll_options_poll FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 投票记录：唯一键 (poll_id, option_id, user_id) 防同一用户重复投同一选项；删用户/删投票/删选项级联清理。
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id         BIGINT   NOT NULL AUTO_INCREMENT,
+    poll_id    BIGINT   NOT NULL,
+    option_id  BIGINT   NOT NULL,
+    user_id    BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_poll_option_user (poll_id, option_id, user_id),
+    KEY idx_poll_votes_user (user_id, poll_id),
+    KEY idx_poll_votes_option (option_id),
+    CONSTRAINT fk_poll_votes_poll   FOREIGN KEY (poll_id)   REFERENCES polls (id)         ON DELETE CASCADE,
+    CONSTRAINT fk_poll_votes_option FOREIGN KEY (option_id) REFERENCES poll_options (id) ON DELETE CASCADE,
+    CONSTRAINT fk_poll_votes_user   FOREIGN KEY (user_id)   REFERENCES users (id)        ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 每日奖励防重：同一用户同一动作类型每天只记一行（签到/发帖/评论）。
+-- 唯一键 (user_id, action_type, action_date) + INSERT IGNORE 保证并发安全（数据库兜底，无需先查后写）。
+CREATE TABLE IF NOT EXISTS daily_rewards (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id     BIGINT       NOT NULL,
+    action_type VARCHAR(20)  NOT NULL COMMENT 'check_in=签到 / post=发帖 / reply=评论',
+    action_date DATE         NOT NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_daily_user_action (user_id, action_type, action_date),
+    KEY idx_daily_user_date (user_id, action_date),
+    CONSTRAINT fk_daily_rewards_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

@@ -24,12 +24,14 @@ public class FollowDao {
             new User(
                     rs.getLong("id"),
                     rs.getString("username"),
+                    rs.getString("nickname"),
                     rs.getString("avatar_url"),
                     rs.getString("bio"),
                     rs.getTimestamp("created_at").toLocalDateTime(),
                     rs.getInt("admin_level"),
                     rs.getInt("hide_favorites"),
-                    nullableTimestamp(rs, "ban_until"));
+                    nullableTimestamp(rs, "ban_until"),
+                    rs.getInt("moe_points"));
 
     public FollowDao(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -76,8 +78,8 @@ public class FollowDao {
     /** 关注该用户的粉丝列表（按关注时间倒序） */
     public List<User> findFollowers(long userId) {
         return jdbcTemplate.query(
-                "SELECT u.id, u.username, u.avatar_url, u.bio, u.admin_level, u.hide_favorites, u.ban_until, u.created_at "
-                        + "FROM follows f JOIN users u ON u.id = f.follower_id "
+                "SELECT u.id, u.username, u.nickname, u.avatar_url, u.bio, u.admin_level, u.hide_favorites, u.ban_until, u.moe_points, u.created_at"
+                        + " FROM follows f JOIN users u ON u.id = f.follower_id "
                         + "WHERE f.following_id = ? ORDER BY f.created_at DESC",
                 USER_ROW_MAPPER, userId);
     }
@@ -85,8 +87,8 @@ public class FollowDao {
     /** 该用户关注的人的列表（按关注时间倒序） */
     public List<User> findFollowing(long userId) {
         return jdbcTemplate.query(
-                "SELECT u.id, u.username, u.avatar_url, u.bio, u.admin_level, u.hide_favorites, u.ban_until, u.created_at "
-                        + "FROM follows f JOIN users u ON u.id = f.following_id "
+                "SELECT u.id, u.username, u.nickname, u.avatar_url, u.bio, u.admin_level, u.hide_favorites, u.ban_until, u.moe_points, u.created_at"
+                        + " FROM follows f JOIN users u ON u.id = f.following_id "
                         + "WHERE f.follower_id = ? ORDER BY f.created_at DESC",
                 USER_ROW_MAPPER, userId);
     }
