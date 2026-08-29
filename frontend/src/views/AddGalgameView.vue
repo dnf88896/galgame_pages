@@ -23,18 +23,16 @@
             />
           </el-form-item>
 
-          <el-form-item label="标签" required>
-            <el-select
-              v-model="form.tags"
-              multiple
-              collapse-tags
-              placeholder="选择标签（至少 1 个）"
-              class="add-tags-select"
-            >
-              <el-option-group v-for="g in tagGroups" :key="g.label" :label="g.label">
-                <el-option v-for="opt in g.options" :key="opt.key" :label="opt.label" :value="opt.key" />
+          <el-form-item label="分类">
+            <el-select v-model="form.categories" multiple collapse-tags filterable placeholder="选择分类" style="width:100%">
+              <el-option-group v-for="g in CATEGORY_GROUPS" :key="g.key" :label="g.name">
+                <el-option v-for="c in GALGAME_CATEGORIES.filter(x => x.group === g.key)" :key="c.key" :value="c.key" :label="c.label" />
               </el-option-group>
             </el-select>
+          </el-form-item>
+
+          <el-form-item label="标签" required>
+            <GalgameTagSelect v-model="form.tagIds" />
           </el-form-item>
 
           <el-form-item label="封面图片">
@@ -65,12 +63,74 @@
             />
           </el-form-item>
 
+          <el-form-item label="会社">
+            <el-select
+              v-model="form.companyId"
+              clearable
+              filterable
+              placeholder="选择会社（可不选）"
+              class="add-tags-select"
+            >
+              <el-option v-for="c in companyOptions" :key="c.id" :label="c.name" :value="c.id" />
+            </el-select>
+          </el-form-item>
+
           <el-form-item label="制作人员">
-            <el-input
-              v-model="form.staff"
-              placeholder="如 Key / Visual Art's"
-              maxlength="200"
-            />
+            <div class="add-links">
+              <div v-for="(link, i) in form.staffLinks" :key="i" class="add-link-row">
+                <el-input
+                  v-model="link.description"
+                  placeholder="职责/备注（如 脚本、原画）"
+                  class="add-link-label"
+                  maxlength="200"
+                />
+                <el-select
+                  v-model="link.id"
+                  filterable
+                  clearable
+                  placeholder="选择制作人员"
+                  class="add-link-url"
+                >
+                  <el-option v-for="s in staffOptions" :key="s.id" :label="s.name" :value="s.id" />
+                </el-select>
+                <el-button
+                  link
+                  type="danger"
+                  :aria-label="`删除制作人员 ${i + 1}`"
+                  @click="form.staffLinks.splice(i, 1)"
+                >删除</el-button>
+              </div>
+              <el-button type="primary" plain size="small" class="add-link-btn" @click="form.staffLinks.push({ id: null, description: '' })">+ 添加制作人员</el-button>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="角色">
+            <div class="add-links">
+              <div v-for="(link, i) in form.characterLinks" :key="i" class="add-link-row">
+                <el-input
+                  v-model="link.description"
+                  placeholder="定位/备注（如 女主、CV）"
+                  class="add-link-label"
+                  maxlength="200"
+                />
+                <el-select
+                  v-model="link.id"
+                  filterable
+                  clearable
+                  placeholder="选择角色"
+                  class="add-link-url"
+                >
+                  <el-option v-for="c in characterOptions" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <el-button
+                  link
+                  type="danger"
+                  :aria-label="`删除角色 ${i + 1}`"
+                  @click="form.characterLinks.splice(i, 1)"
+                >删除</el-button>
+              </div>
+              <el-button type="primary" plain size="small" class="add-link-btn" @click="form.characterLinks.push({ id: null, description: '' })">+ 添加角色</el-button>
+            </div>
           </el-form-item>
 
           <el-form-item label="发售日期">
@@ -124,7 +184,9 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
 import { refreshMoe } from '../utils/moeGain'
-import { fetchTagStructure, getErrorMessage, resolveAssetUrl } from '../utils/format'
+import { getErrorMessage, resolveAssetUrl } from '../utils/format'
+import GalgameTagSelect from '../components/GalgameTagSelect.vue'
+import { GALGAME_CATEGORIES, CATEGORY_GROUPS } from '../constants/galgameCategory'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,35 +202,51 @@ function goLogin() {
 
 const form = reactive({
   name: '',
-  tags: [],
+  categories: [],
+  tagIds: [],
   image: '',
   description: '',
-  staff: '',
+  companyId: null,
+  staffLinks: [],
+  characterLinks: [],
   releaseDate: '',
 })
 const links = ref([{ label: '', url: '' }])
 const imagePreview = ref('')
 const submitting = ref(false)
 
-// 标签结构：从 galgame-resource 大类下按前缀分 4 组（类型 / 语言 / 平台 / 作品）
-const tagCategories = ref([])
-const tagGroups = computed(() => {
-  const gal = (tagCategories.value || []).find((c) => c && c.key === 'galgame-resource')
-  const sections = Array.isArray(gal?.sections) ? gal.sections : []
-  return [
-    { label: '类型', prefix: 'gg-type-' },
-    { label: '语言', prefix: 'gg-lang-' },
-    { label: '平台', prefix: 'gg-plat-' },
-    { label: '作品', prefix: 'gg-work-' },
-  ]
-    .map((g) => ({
-      label: g.label,
-      options: sections
-        .filter((s) => s && s.key && s.key.startsWith(g.prefix))
-        .map((s) => ({ key: s.key, label: s.label })),
-    }))
-    .filter((g) => g.options.length)
-})
+// 会社下拉选项：GET /companies 返回数组（不是 {data:...} 包一层），失败兜底空数组不影响提交
+const companyOptions = ref([])
+async function loadCompanyOptions() {
+  try {
+    const { data } = await api.get('/companies')
+    companyOptions.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    // 拉取失败不阻断提交（会社可空）
+  }
+}
+
+// 制作人员下拉选项：GET /staffs 返回数组（仅 approved），失败兜底空数组不影响提交
+const staffOptions = ref([])
+async function loadStaffOptions() {
+  try {
+    const { data } = await api.get('/staffs')
+    staffOptions.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    // 拉取失败不阻断提交（制作人员可空）
+  }
+}
+
+// 角色下拉选项：GET /characters 返回数组（仅 approved），失败兜底空数组不影响提交
+const characterOptions = ref([])
+async function loadCharacterOptions() {
+  try {
+    const { data } = await api.get('/characters')
+    characterOptions.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    // 拉取失败不阻断提交（角色可空）
+  }
+}
 
 function goBack() {
   if (window.history.length > 1) router.back()
@@ -210,20 +288,23 @@ async function submit() {
     ElMessage.error('请填写 Galgame 名称。')
     return
   }
-  if (!form.tags.length) {
+  if (!form.tagIds.length) {
     ElMessage.error('请至少选择 1 个标签。')
     return
   }
   const payload = {
     name,
+    categories: form.categories.filter((c) => c && c.trim()),
     description: form.description.trim(),
     image: form.image,
-    staff: form.staff.trim(),
+    company_id: form.companyId || null,
+    staffs: form.staffLinks.filter((l) => l.id != null).map((l) => ({ id: l.id, description: (l.description || '').trim() })),
+    characters: form.characterLinks.filter((l) => l.id != null).map((l) => ({ id: l.id, description: (l.description || '').trim() })),
     release_date: form.releaseDate || null,
     links: links.value
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
       .filter((l) => l.url),
-    tags: form.tags,
+    tag_ids: form.tagIds.filter((id) => id != null),
   }
   submitting.value = true
   try {
@@ -243,8 +324,10 @@ async function submit() {
   }
 }
 
-onMounted(async () => {
-  tagCategories.value = await fetchTagStructure()
+onMounted(() => {
+  loadCompanyOptions()
+  loadStaffOptions()
+  loadCharacterOptions()
 })
 </script>
 

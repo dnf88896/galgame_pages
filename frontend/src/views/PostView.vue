@@ -134,6 +134,9 @@
               </div>
               <div v-if="parentNameOf(r)" class="reply-parent">回复 @{{ parentNameOf(r) }}</div>
               <p class="reply-content">{{ r.content }}</p>
+              <div v-if="r.images && r.images.length" class="reply-images">
+                <img v-for="u in r.images" :key="u" :src="resolveAssetUrl(u)" alt="回复图片" @click="openImage(u)" />
+              </div>
               <div class="reply-actions">
                 <button
                   class="like-button small"
@@ -202,6 +205,12 @@
                 show-word-limit
                 placeholder="写下你的回复"
               />
+              <div v-if="replyForm.images.length" class="reply-image-previews">
+                <div v-for="(u, i) in replyForm.images" :key="u" class="reply-image-preview">
+                  <img :src="resolveAssetUrl(u)" alt="回复图片预览" />
+                  <button type="button" aria-label="移除图片" @click="replyForm.images.splice(i, 1)">×</button>
+                </div>
+              </div>
               <EmojiPicker
                 v-if="replyEmojiVisible"
                 class="reply-emoji-picker"
@@ -214,6 +223,20 @@
                   type="text"
                   @click="replyEmojiVisible = !replyEmojiVisible"
                 >😀</el-button>
+                <input
+                  ref="replyImageInput"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style="display:none"
+                  @change="onReplyImagesChange"
+                />
+                <el-button
+                  class="image-toggle"
+                  type="text"
+                  :disabled="replyImageUploading"
+                  @click="replyImageInput?.click()"
+                >🖼️</el-button>
                 <el-button type="primary" :loading="replySubmitting" @click="submitReply">
                   发表回复
                 </el-button>
@@ -357,10 +380,41 @@ function onReplyEmoji(e) {
   replyForm.content += e
 }
 
-const replyForm = reactive({ content: '' })
+const replyForm = reactive({ content: '', images: [] })
 const replySubmitting = ref(false)
 const replyStatus = ref('')
 const replyStatusError = ref(false)
+
+// 回复图片上传：隐藏 file input + 是否上传中
+const replyImageInput = ref(null)
+const replyImageUploading = ref(false)
+
+// 逐张上传所选图片 → URL 存入 replyForm.images（成功后清空 input 以便重复选择）
+async function onReplyImagesChange(e) {
+  const files = Array.from(e.target.files || [])
+  if (!files.length) return
+  replyImageUploading.value = true
+  try {
+    for (const file of files) {
+      const fd = new FormData()
+      fd.append('file', file)
+      try {
+        const { data } = await api.post('/comment-images', fd)
+        if (data?.url) replyForm.images.push(data.url)
+      } catch (err) {
+        ElMessage.error(getErrorMessage(err, '图片上传失败'))
+      }
+    }
+  } finally {
+    e.target.value = ''
+    replyImageUploading.value = false
+  }
+}
+
+// 点击评论图片 → 新窗口打开
+function openImage(u) {
+  if (u) window.open(resolveAssetUrl(u), '_blank')
+}
 
 // 正在回复的目标回复对象（null 表示普通回复）
 const replyingTo = ref(null)
@@ -518,8 +572,10 @@ async function submitReply() {
   try {
     const body = { content }
     if (replyingTo.value) body.parent_id = replyingTo.value.id
+    if (replyForm.images.length) body.images = [...replyForm.images]
     await api.post(`/posts/${postId.value}/replies`, body)
     replyForm.content = ''
+    replyForm.images = []
     replyingTo.value = null
     replyStatus.value = ''
     ElMessage.success('回复已发表')
@@ -659,6 +715,7 @@ onMounted(() => {
 }
 .content {
   white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.7;
   color: #303133;
   margin: 0 0 16px;
@@ -769,6 +826,7 @@ onMounted(() => {
 }
 .reply-content {
   white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.6;
   color: #303133;
   margin: 0 0 8px;
@@ -857,5 +915,56 @@ onMounted(() => {
 }
 .emoji-toggle.active {
   color: #409eff;
+}
+/* 图片开关按钮：与 emoji-toggle 同款 */
+.image-toggle {
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+/* 回复图片（已发表） */
+.reply-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.reply-images img {
+  max-width: 240px;
+  max-height: 180px;
+  border-radius: 6px;
+  cursor: pointer;
+  object-fit: cover;
+}
+/* 回复图片预览（上传后未发表） */
+.reply-image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.reply-image-preview {
+  position: relative;
+}
+.reply-image-preview img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.reply-image-preview button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  background: #f56c6c;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
 }
 </style>

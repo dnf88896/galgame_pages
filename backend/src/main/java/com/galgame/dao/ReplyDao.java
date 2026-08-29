@@ -17,6 +17,9 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.galgame.model.LikeResult;
 import com.galgame.model.Reply;
 
@@ -34,12 +37,15 @@ public class ReplyDao {
     private static final String BASE_COLUMNS =
             "replies.id, replies.post_id, replies.user_id, "
                     + "COALESCE(u.nickname, replies.author) AS author, "
-                    + "replies.content, replies.created_at, replies.like_count, replies.dislike_count, "
+                    + "replies.content, replies.images, replies.created_at, replies.like_count, replies.dislike_count, "
                     + "replies.parent_id, "
                     + "COALESCE(pu.nickname, replies.parent_author) AS parent_author, "
                     + "replies.is_pinned";
 
     private final JdbcTemplate jdbcTemplate;
+
+    /** Jackson 3 ObjectMapper：RowMapper 里把 replies.images 的 JSON 数组文本反序列化成 List<String> */
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final RowMapper<Reply> REPLY_ROW_MAPPER = (ResultSet rs, int rowNum) ->
             Reply.core(
@@ -50,6 +56,7 @@ public class ReplyDao {
                     nullableString(rs, "parent_author"),
                     rs.getString("author"),
                     rs.getString("content"),
+                    parseImages(rs.getString("images")),
                     rs.getTimestamp("created_at").toLocalDateTime(),
                     rs.getInt("like_count"),
                     rs.getInt("dislike_count"),
@@ -94,30 +101,35 @@ public class ReplyDao {
         jdbcTemplate.update("UPDATE replies SET is_pinned = ? WHERE id = ?", pinned, replyId);
     }
 
-    /** 新增回复，返回数据库生成的自增 id */
-    public Long insert(Long postId, String author, String content, Long userId, Long parentId, String parentAuthor) {
-        String sql = "INSERT INTO replies (post_id, author, content, user_id, parent_id, parent_author) VALUES (?, ?, ?, ?, ?, ?)";
+    /** 新增回复，返回数据库生成的自增 id；imagesJson 为图片 URL 的 JSON 数组文本（无图片传 null） */
+    public Long insert(Long postId, String author, String content, String imagesJson, Long userId, Long parentId, String parentAuthor) {
+        String sql = "INSERT INTO replies (post_id, author, content, images, user_id, parent_id, parent_author) VALUES (?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, postId);
             ps.setString(2, author);
             ps.setString(3, content);
-            if (userId == null) {
-                ps.setNull(4, java.sql.Types.BIGINT);
+            if (imagesJson == null) {
+                ps.setNull(4, java.sql.Types.VARCHAR);
             } else {
-                ps.setLong(4, userId);
+                ps.setString(4, imagesJson);
             }
-            if (parentId == null) {
+            if (userId == null) {
                 ps.setNull(5, java.sql.Types.BIGINT);
             } else {
-                ps.setLong(5, parentId);
+                ps.setLong(5, userId);
+            }
+            if (parentId == null) {
+                ps.setNull(6, java.sql.Types.BIGINT);
+            } else {
+                ps.setLong(6, parentId);
             }
             // 嵌套回复时快照父作者名；父评论被删后子回复仍能显示「回复 @xx」
             if (parentAuthor == null) {
-                ps.setNull(6, java.sql.Types.VARCHAR);
+                ps.setNull(7, java.sql.Types.VARCHAR);
             } else {
-                ps.setString(6, parentAuthor);
+                ps.setString(7, parentAuthor);
             }
             return ps;
         }, keyHolder);
@@ -246,5 +258,19 @@ public class ReplyDao {
     private static String nullableString(ResultSet rs, String column) throws SQLException {
         String value = rs.getString(column);
         return rs.wasNull() ? null : value;
+    }
+
+    /** DB 里 images 列存的 JSON 数组文本（如 ["/uploads/.../a.png"]）→ List<String>；null/空/解析失败 → null（序列化时省略） */
+    private static List<String> parseImages(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            List<String> images = JSON.readValue(json, new TypeReference<List<String>>() {
+            });
+            return (images == null || images.isEmpty()) ? null : images;
+        } catch (JacksonException e) {
+            return null;
+        }
     }
 }

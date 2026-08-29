@@ -38,11 +38,17 @@
               </div>
               <div class="gal-card-body">
                 <div class="gal-card-head">
-                  <h2 class="gal-name">{{ p.name }}</h2>
+                  <div class="gal-review-name-row">
+                    <h2 class="gal-name">{{ p.name }}</h2>
+                    <!-- 提交类型标注：update=修改（橙）、create=创建（蓝）；旧后端无 apply_type 时走 else 显示「创建」 -->
+                    <el-tag v-if="p.apply_type === 'update'" type="warning" size="small">修改</el-tag>
+                    <el-tag v-else type="primary" size="small">创建</el-tag>
+                  </div>
                   <div class="gal-tags">
-                    <span v-for="k in (p.tags || [])" :key="k" class="gal-tag">#{{ sectionLabel(tagCategories, k) || k }}</span>
+                    <span v-for="c in (p.categories || [])" :key="c" class="gal-tag">{{ categoryLabel(c) }}</span>
                   </div>
                 </div>
+                <p v-if="p.apply_type === 'update'" class="gal-meta-line gal-origin-line">修改自：{{ p.original_name || ('#' + p.original_id) }}</p>
                 <p v-if="p.creator" class="gal-meta-line">提交人：{{ p.creator }}</p>
                 <p v-if="p.created_at" class="gal-meta-line">提交时间：{{ formatTime(p.created_at) }}</p>
               </div>
@@ -62,7 +68,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import { user } from '../store/user'
-import { fetchTagStructure, sectionLabel, formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
+import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
+import { categoryLabel } from '../constants/galgameCategory'
 
 const router = useRouter()
 
@@ -72,7 +79,6 @@ const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
 const pendingList = ref([])
 const loading = ref(false)
 const loadError = ref('')
-const tagCategories = ref([])
 
 async function load() {
   loading.value = true
@@ -103,9 +109,8 @@ function coverImgError(p) {
   p._coverError = true
 }
 
-onMounted(async () => {
+onMounted(() => {
   if (isAdmin.value) {
-    tagCategories.value = await fetchTagStructure()
     load()
   }
 })

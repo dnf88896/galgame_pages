@@ -30,6 +30,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import tools.jackson.databind.ObjectMapper;
+
 import com.galgame.auth.AuthContext;
 import com.galgame.auth.TokenService;
 import com.galgame.constants.TagConstants;
@@ -68,10 +70,11 @@ public class PostController {
     private final TokenService tokenService;
     private final BlockDao blockDao;
     private final MentionService mentionService;
+    private final ObjectMapper objectMapper;
 
     public PostController(PostDao postDao, ReplyDao replyDao, AttachmentDao attachmentDao,
                           UserDao userDao, TokenService tokenService, BlockDao blockDao,
-                          MentionService mentionService) {
+                          MentionService mentionService, ObjectMapper objectMapper) {
         this.postDao = postDao;
         this.replyDao = replyDao;
         this.attachmentDao = attachmentDao;
@@ -79,6 +82,7 @@ public class PostController {
         this.tokenService = tokenService;
         this.blockDao = blockDao;
         this.mentionService = mentionService;
+        this.objectMapper = objectMapper;
     }
 
     /** 1. 帖子列表（公开），?q= 关键词、?category= 分区、?sections= 多标签（逗号分隔或重复参数，AND 语义，可配合旧 ?section=）、?sort= 排序（time 默认/hot/likes/following），均可选 */
@@ -192,7 +196,7 @@ public class PostController {
         return doCreatePost(category, sections, section, title, content, null, null, userId);
     }
 
-    /** 4a. 回复帖子（需登录，multipart/form-data） */
+    /** 4a. 回复帖子（需登录，multipart/form-data；无图片） */
     @PostMapping(value = "/{id}/replies", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Object> createReplyMultipart(
             @PathVariable Long id,
@@ -200,10 +204,10 @@ public class PostController {
             @RequestParam(value = "parent_id", required = false) Long parentId,
             HttpServletRequest request) {
         long userId = AuthContext.currentUserId(request);
-        return doCreateReply(id, content, userId, parentId);
+        return doCreateReply(id, content, userId, parentId, null);
     }
 
-    /** 4b. 回复帖子（需登录，application/json） */
+    /** 4b. 回复帖子（需登录，application/json，body 可带 images 图片 URL 数组） */
     @PostMapping(value = "/{id}/replies", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Object> createReplyJson(
             @PathVariable Long id,
@@ -220,7 +224,11 @@ public class PostController {
                 return ResponseEntity.badRequest().body(Map.of("error", "无效的 parent_id。"));
             }
         }
-        return doCreateReply(id, content, userId, parentId);
+        ImagesValidation images = validateImages(body);
+        if (images.error() != null) {
+            return images.error();
+        }
+        return doCreateReply(id, content, userId, parentId, images.imagesJson());
     }
 
     /** 5. 帖子点赞 toggle（需登录，按 user_id 去重） */
@@ -433,7 +441,7 @@ public class PostController {
                 .body(post.withContext(false, null, null, attachments, List.of()));
     }
 
-    private ResponseEntity<Object> doCreateReply(Long postId, String contentRaw, long userId, Long parentId) {
+    private ResponseEntity<Object> doCreateReply(Long postId, String contentRaw, long userId, Long parentId, String imagesJson) {
         if (!postDao.existsById(postId)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "帖子不存在。"));
         }
@@ -455,7 +463,7 @@ public class PostController {
             // 嵌套回复：快照父回复的作者名，父评论被删后子回复仍能显示「回复 @xx」
             parentAuthor = parent.get().author();
         }
-        Long replyId = replyDao.insert(postId, author, content, userId, parentId, parentAuthor);
+        Long replyId = replyDao.insert(postId, author, content, imagesJson, userId, parentId, parentAuthor);
         // 每日首次评论 +5 萌点（奖励尽力而为：失败不阻断评论）
         try {
             userDao.claimDailyReward(userId, "reply", 5);
@@ -466,6 +474,42 @@ public class PostController {
         mentionService.notifyMention(userId, postId, replyId, null, content);
         Reply reply = replyDao.findById(replyId).orElseThrow(() -> new IllegalStateException("写入的回复读取失败"));
         return ResponseEntity.status(HttpStatus.CREATED).body(reply);
+    }
+
+    /** 图片校验结果：error 非 null 表示校验失败（可直接作为响应返回），否则 imagesJson 为序列化后的图片 URL 数组文本（无图片为 null） */
+    private record ImagesValidation(ResponseEntity<Object> error, String imagesJson) {
+    }
+
+    /**
+     * 校验并序列化评论图片：images 可 null / List&lt;String&gt;；每项 trim 非空、以 /uploads/ 开头、≤500 字；条数 ≤9。
+     * 不合法返回 400「图片参数不合法。」；空数组视为无图片（返回 null）。
+     */
+    private ImagesValidation validateImages(Map<String, Object> body) {
+        Object imagesObj = body == null ? null : body.get("images");
+        if (imagesObj == null) {
+            return new ImagesValidation(null, null);
+        }
+        if (!(imagesObj instanceof List<?> list)) {
+            return new ImagesValidation(ResponseEntity.badRequest().body(Map.of("error", "图片参数不合法。")), null);
+        }
+        if (list.size() > 9) {
+            return new ImagesValidation(ResponseEntity.badRequest().body(Map.of("error", "图片参数不合法。")), null);
+        }
+        List<String> images = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof String s)) {
+                return new ImagesValidation(ResponseEntity.badRequest().body(Map.of("error", "图片参数不合法。")), null);
+            }
+            String t = s.trim();
+            if (t.isEmpty() || t.length() > 500 || !t.startsWith("/uploads/")) {
+                return new ImagesValidation(ResponseEntity.badRequest().body(Map.of("error", "图片参数不合法。")), null);
+            }
+            images.add(t);
+        }
+        if (images.isEmpty()) {
+            return new ImagesValidation(null, null);
+        }
+        return new ImagesValidation(null, objectMapper.writeValueAsString(images));
     }
 
     private void saveAttachments(Long postId, MultipartFile[] files) {

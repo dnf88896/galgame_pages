@@ -87,6 +87,8 @@
 
         <div class="compose-actions">
           <el-button type="primary" :loading="submitting" @click="submit">发表</el-button>
+          <el-button @click="saveDraft">保存草稿</el-button>
+          <el-button v-if="hasDraft" link type="danger" @click="clearDraft">清除草稿</el-button>
           <span class="form-status" :class="{ error: formStatusError }">{{ formStatus }}</span>
         </div>
       </el-form>
@@ -102,7 +104,7 @@ import api from '../api'
 import EmojiPicker from '../components/EmojiPicker.vue'
 import MentionTextarea from '../components/MentionTextarea.vue'
 import { goBack } from '../utils/navigation'
-import { token } from '../store/user'
+import { token, user } from '../store/user'
 import { categories, formatSize, getErrorMessage, fetchTagStructure } from '../utils/format'
 import { refreshMoe } from '../utils/moeGain'
 
@@ -175,6 +177,57 @@ function clearAttachments() {
   attachmentQueue.value = []
 }
 
+// 发帖草稿：localStorage 按用户 id 隔离，只存文字字段（分区/标签/标题/正文），附件/封面不存（浏览器无法存文件）
+const DRAFT_KEY = 'galforum_post_draft'
+const draftKey = () => `${DRAFT_KEY}_${user.value?.id}`
+const hasDraft = ref(false)
+
+// 保存当前表单为草稿（可随时覆盖；附件/封面已选时提示不会随草稿保存）
+function saveDraft() {
+  if (!loggedIn.value) return
+  localStorage.setItem(
+    draftKey(),
+    JSON.stringify({
+      category: form.category,
+      sections: form.sections,
+      title: form.title,
+      content: form.content,
+    }),
+  )
+  hasDraft.value = true
+  if (attachmentQueue.value.length || coverFile.value) {
+    ElMessage.success('草稿已保存（附件和封面不会随草稿保存，请发帖前重新选择）')
+  } else {
+    ElMessage.success('草稿已保存')
+  }
+}
+
+// 恢复草稿：进入发帖页且已登录时调用，把上次保存的草稿填充进表单
+function loadDraft() {
+  if (!loggedIn.value) return
+  try {
+    const raw = localStorage.getItem(draftKey())
+    if (!raw) return
+    const d = JSON.parse(raw)
+    if (!d || typeof d !== 'object') return
+    if (categories.includes(d.category)) form.category = d.category
+    if (Array.isArray(d.sections)) form.sections = d.sections
+    if (typeof d.title === 'string') form.title = d.title
+    if (typeof d.content === 'string') form.content = d.content
+    hasDraft.value = true
+    ElMessage.info('已恢复上次保存的草稿')
+  } catch {
+    // 草稿损坏（JSON 解析失败）静默忽略，不打断发帖页
+  }
+}
+
+// 清除草稿（silent=true 时只删不提示，用于发帖成功后静默清理）
+function clearDraft({ silent = false } = {}) {
+  localStorage.removeItem(draftKey())
+  hasDraft.value = false
+  if (!silent) ElMessage.success('草稿已清除')
+}
+
 async function submit() {
   const title = form.title.trim()
   const content = form.content.trim()
@@ -209,6 +262,7 @@ async function submit() {
     const { data } = await api.post('/posts', fd)
     if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
     ElMessage.success('发布成功')
+    clearDraft({ silent: true }) // 发帖成功清除草稿
     // 每日首次发帖 +10 萌点：refreshMoe 检测增量弹「+n萌点」并同步（非首次不加分则不弹）
     refreshMoe()
     // 发布成功直接进入帖子详情页
@@ -224,6 +278,7 @@ async function submit() {
 }
 
 onMounted(async () => {
+  loadDraft() // 已登录且有草稿时恢复上次未填完的表单
   try {
     const result = await fetchTagStructure()
     const cats = Array.isArray(result) ? result : result?.categories || []

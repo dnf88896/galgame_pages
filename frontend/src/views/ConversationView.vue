@@ -1,7 +1,7 @@
 <template>
   <div class="page chat-page">
     <div class="chat-header">
-      <el-button link type="primary" @click="router.push('/messages')">返回</el-button>
+      <el-button link type="primary" @click="goBack">返回</el-button>
       <router-link v-if="peer" :to="`/user/${userId}`" class="chat-user">
         <el-avatar v-if="peer.avatar_url" :src="avatarSrc" :size="32" />
         <el-avatar v-else :size="32" class="avatar-text">{{ firstChar }}</el-avatar>
@@ -105,6 +105,16 @@ import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
+
+// 返回上一页：有后退记录则回退到进入私聊前的页面（消息列表 / 个人主页等）；
+// 无历史（如直接输 URL 打开本页）时兜底回消息列表。
+function goBack() {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/messages')
+  }
+}
 
 const userId = computed(() => Number(route.params.userId))
 const peer = ref(null)

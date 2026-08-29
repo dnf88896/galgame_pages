@@ -282,6 +282,7 @@ async function removePoll() {
 }
 .poll-desc {
   white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.6;
   color: #666;
   margin: 0 0 8px;

@@ -236,9 +236,10 @@ const leftNavGroups = [
   ] },
   { label: 'galgame', children: [
     { label: 'galgame', to: '/galgame' },
-    { label: '左侧边栏按钮3-2' },
-    { label: '左侧边栏按钮3-3' },
-    { label: '左侧边栏按钮3-4' },
+    { label: '会社', to: '/company' },
+    { label: '制作人员', to: '/staff' },
+    { label: '角色', to: '/character' },
+    { label: '标签', to: '/galgame/tag' },
   ] },
   { label: '社交', children: [
     { label: '搜索用户', to: '/search-user' },

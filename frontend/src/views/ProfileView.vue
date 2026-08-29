@@ -576,6 +576,7 @@ onMounted(() => load())
   font-size: 14px;
   color: #606266;
   white-space: pre-wrap;
+  word-break: break-word;
   line-height: 1.6;
 }
 .profile-bio.muted {

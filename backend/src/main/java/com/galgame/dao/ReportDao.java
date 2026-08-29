@@ -20,7 +20,8 @@ public class ReportDao {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * 举报列表行。对 post 目标，replyContent/replyPostId 为 null；对 reply 目标，postTitle 为 null
+     * 举报列表行。对 post 目标，replyContent/replyPostId/galgameReplyContent 为 null；对 reply 目标，postTitle 为 null；
+     * 对 greply（Galgame 评论）目标，postTitle/replyContent/replyPostId 为 null，galgameReplyContent 为评论内容
      * （目标已被删除时 LEFT JOIN 匹配不到，对应列同样为 null）。
      */
     public record ReportRow(
@@ -34,6 +35,7 @@ public class ReportDao {
             String postTitle,
             String replyContent,
             Long replyPostId,
+            String galgameReplyContent,
             Integer status,
             LocalDateTime handledAt,
             String result) {
@@ -45,6 +47,7 @@ public class ReportDao {
                     + " r.reporter_id, u.username AS reporter_username,"
                     + " p.title AS post_title,"
                     + " re.content AS reply_content, re.post_id AS reply_post_id,"
+                    + " gr.content AS greply_content,"
                     + " r.status, r.handled_at, r.result";
 
     private static final RowMapper<ReportRow> REPORT_ROW_MAPPER = (ResultSet rs, int rowNum) ->
@@ -59,6 +62,7 @@ public class ReportDao {
                     rs.getString("post_title"),
                     rs.getString("reply_content"),
                     nullableLong(rs, "reply_post_id"),
+                    rs.getString("greply_content"),
                     rs.getInt("status"),
                     nullableTimestamp(rs, "handled_at"),
                     rs.getString("result"));
@@ -85,6 +89,7 @@ public class ReportDao {
                         + " JOIN users u ON u.id = r.reporter_id"
                         + " LEFT JOIN posts p ON p.id = r.target_id AND r.target_type = 'post'"
                         + " LEFT JOIN replies re ON re.id = r.target_id AND r.target_type = 'reply'"
+                        + " LEFT JOIN galgame_replies gr ON gr.id = r.target_id AND r.target_type = 'greply'"
                         + " ORDER BY r.id DESC"
                         + " LIMIT 200",
                 REPORT_ROW_MAPPER);
@@ -98,6 +103,7 @@ public class ReportDao {
                         + " JOIN users u ON u.id = r.reporter_id"
                         + " LEFT JOIN posts p ON p.id = r.target_id AND r.target_type = 'post'"
                         + " LEFT JOIN replies re ON re.id = r.target_id AND r.target_type = 'reply'"
+                        + " LEFT JOIN galgame_replies gr ON gr.id = r.target_id AND r.target_type = 'greply'"
                         + " WHERE r.id = ?",
                 REPORT_ROW_MAPPER, id);
         return rows.stream().findFirst();

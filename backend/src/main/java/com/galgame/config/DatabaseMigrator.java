@@ -68,6 +68,7 @@ public class DatabaseMigrator implements ApplicationRunner {
     private static final String GALGAME_RATINGS_DDL =
             "CREATE TABLE galgame_ratings ("
                     + "galgame_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "score DECIMAL(3,1) NULL, "
                     + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
                     + "PRIMARY KEY (galgame_id, user_id), "
                     + "KEY idx_galgame_ratings_user (user_id), "
@@ -145,6 +146,45 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "CONSTRAINT fk_poll_votes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+    private static final String GALGAME_REPLIES_DDL =
+            "CREATE TABLE galgame_replies ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "galgame_id BIGINT NOT NULL, "
+                    + "user_id BIGINT NULL, "
+                    + "author VARCHAR(32) NOT NULL DEFAULT '匿名', "
+                    + "content TEXT NOT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "like_count INT NOT NULL DEFAULT 0, "
+                    + "dislike_count INT NOT NULL DEFAULT 0, "
+                    + "parent_id BIGINT NULL, "
+                    + "parent_author VARCHAR(32) NULL, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_galgame_replies_galgame (galgame_id), "
+                    + "KEY idx_galgame_replies_user (user_id), "
+                    + "KEY idx_galgame_replies_parent (parent_id), "
+                    + "CONSTRAINT fk_galgame_replies_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_galgame_replies_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL, "
+                    + "CONSTRAINT fk_galgame_replies_parent FOREIGN KEY (parent_id) REFERENCES galgame_replies (id) ON DELETE SET NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_REPLY_LIKES_DDL =
+            "CREATE TABLE galgame_reply_likes ("
+                    + "reply_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (reply_id, user_id), "
+                    + "CONSTRAINT fk_galgame_reply_likes_reply FOREIGN KEY (reply_id) REFERENCES galgame_replies (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_galgame_reply_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_REPLY_DISLIKES_DDL =
+            "CREATE TABLE galgame_reply_dislikes ("
+                    + "reply_id BIGINT NOT NULL, user_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (reply_id, user_id), "
+                    + "CONSTRAINT fk_galgame_reply_dislikes_reply FOREIGN KEY (reply_id) REFERENCES galgame_replies (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_galgame_reply_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
     private static final String DAILY_REWARDS_DDL =
             "CREATE TABLE daily_rewards ("
                     + "id BIGINT NOT NULL AUTO_INCREMENT, "
@@ -156,6 +196,147 @@ public class DatabaseMigrator implements ApplicationRunner {
                     + "UNIQUE KEY uk_daily_user_action (user_id, action_type, action_date), "
                     + "KEY idx_daily_user_date (user_id, action_date), "
                     + "CONSTRAINT fk_daily_rewards_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String STAFFS_DDL =
+            "CREATE TABLE staffs ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "name VARCHAR(200) NOT NULL, "
+                    + "description TEXT NULL, "
+                    + "image VARCHAR(500) NULL, "
+                    + "view_count INT NOT NULL DEFAULT 0, "
+                    + "created_by BIGINT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                    + "status VARCHAR(20) NOT NULL DEFAULT 'approved', "
+                    + "reject_reason VARCHAR(500) NULL, "
+                    + "reviewed_at DATETIME NULL, "
+                    + "moe_awarded TINYINT(1) NOT NULL DEFAULT 0, "
+                    + "apply_type VARCHAR(10) NOT NULL DEFAULT 'create', "
+                    + "original_id BIGINT NULL, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_staffs_name (name), "
+                    + "KEY idx_staffs_status (status), "
+                    + "KEY idx_staffs_original_id (original_id), "
+                    + "CONSTRAINT fk_staffs_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String CHARACTERS_DDL =
+            "CREATE TABLE characters ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "name VARCHAR(200) NOT NULL, "
+                    + "description TEXT NULL, "
+                    + "image VARCHAR(500) NULL, "
+                    + "view_count INT NOT NULL DEFAULT 0, "
+                    + "created_by BIGINT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                    + "status VARCHAR(20) NOT NULL DEFAULT 'approved', "
+                    + "reject_reason VARCHAR(500) NULL, "
+                    + "reviewed_at DATETIME NULL, "
+                    + "moe_awarded TINYINT(1) NOT NULL DEFAULT 0, "
+                    + "apply_type VARCHAR(10) NOT NULL DEFAULT 'create', "
+                    + "original_id BIGINT NULL, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_characters_name (name), "
+                    + "KEY idx_characters_status (status), "
+                    + "KEY idx_characters_original_id (original_id), "
+                    + "CONSTRAINT fk_characters_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_STAFF_DDL =
+            "CREATE TABLE galgame_staff ("
+                    + "galgame_id BIGINT NOT NULL, staff_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (galgame_id, staff_id), "
+                    + "KEY idx_gs_staff (staff_id), "
+                    + "CONSTRAINT fk_gs_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_gs_staff FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_CHARACTER_DDL =
+            "CREATE TABLE galgame_character ("
+                    + "galgame_id BIGINT NOT NULL, character_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (galgame_id, character_id), "
+                    + "KEY idx_gc_character (character_id), "
+                    + "CONSTRAINT fk_gc_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_gc_character FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String STAFF_CHARACTER_DDL =
+            "CREATE TABLE staff_character ("
+                    + "staff_id BIGINT NOT NULL, character_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (staff_id, character_id), "
+                    + "KEY idx_sc_character (character_id), "
+                    + "CONSTRAINT fk_sc_staff FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_sc_character FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String TAGS_DDL =
+            "CREATE TABLE tags ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "name VARCHAR(50) NOT NULL COMMENT '标签名称（唯一，中文）', "
+                    + "alias VARCHAR(50) NULL COMMENT '旧 section_key 别名（gg-*），播种迁移/兼容用', "
+                    + "category VARCHAR(20) NOT NULL DEFAULT 'content' COMMENT 'type资源类型/language语言/platform平台/content游戏内容/meta作品属性/technical技术细节/sexual成人内容', "
+                    + "spoiler_level INT NOT NULL DEFAULT 0 COMMENT '剧透等级：0无剧透/1轻微剧透/2严重剧透', "
+                    + "description VARCHAR(200) NULL COMMENT '标签说明', "
+                    + "created_by BIGINT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                    + "status VARCHAR(20) NOT NULL DEFAULT 'approved' COMMENT 'approved/pending/rejected', "
+                    + "reject_reason VARCHAR(500) NULL, "
+                    + "reviewed_at DATETIME NULL, "
+                    + "moe_awarded TINYINT(1) NOT NULL DEFAULT 0, "
+                    + "PRIMARY KEY (id), "
+                    + "UNIQUE KEY uk_tags_name (name), "
+                    + "KEY idx_tags_category (category), "
+                    + "KEY idx_tags_status (status), "
+                    + "CONSTRAINT fk_tags_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_TAG_DDL =
+            "CREATE TABLE galgame_tag ("
+                    + "galgame_id BIGINT NOT NULL, tag_id BIGINT NOT NULL, "
+                    + "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (galgame_id, tag_id), "
+                    + "KEY idx_gt_tag (tag_id), "
+                    + "CONSTRAINT fk_gt_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_gt_tag FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_IMAGES_DDL =
+            "CREATE TABLE galgame_images ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT, "
+                    + "galgame_id BIGINT NOT NULL, "
+                    + "url VARCHAR(500) NOT NULL, "
+                    + "sort_order INT NOT NULL DEFAULT 0, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (id), "
+                    + "KEY idx_gi_galgame (galgame_id), "
+                    + "CONSTRAINT fk_gi_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String GALGAME_RELATED_DDL =
+            "CREATE TABLE galgame_related ("
+                    + "galgame_id BIGINT NOT NULL, related_id BIGINT NOT NULL, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "PRIMARY KEY (galgame_id, related_id), "
+                    + "KEY idx_gr_related (related_id), "
+                    + "CONSTRAINT fk_gr_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE, "
+                    + "CONSTRAINT fk_gr_related FOREIGN KEY (related_id) REFERENCES galgames (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    private static final String ENTITY_CONTRIBUTORS_DDL =
+            "CREATE TABLE entity_contributors ("
+                    + "entry_type VARCHAR(20) NOT NULL COMMENT '条目类型：galgame/company/staff/character', "
+                    + "entry_id BIGINT NOT NULL COMMENT '条目 id（对应各实体表主键）', "
+                    + "user_id BIGINT NOT NULL COMMENT '贡献者用户 id', "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '贡献时间', "
+                    + "PRIMARY KEY (entry_type, entry_id, user_id), "
+                    + "KEY idx_ec_entry (entry_type, entry_id), "
+                    + "CONSTRAINT fk_ec_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     private final JdbcTemplate jdbcTemplate;
@@ -200,6 +381,10 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("posts", "pinned_until", "DATETIME NULL");
         // 评论置顶：发帖人/管理员可置顶（无时间限制）
         ensureColumn("replies", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0");
+        // 评论图片：replies / galgame_replies 存图片 URL 的 JSON 数组（独立附件方案，非 content 内嵌）
+        ensureColumn("replies", "images", "TEXT NULL COMMENT '评论图片URL的JSON数组'");
+        ensureColumn("galgame_replies", "images", "TEXT NULL COMMENT '评论图片URL的JSON数组'");
+        ensureColumn("galgame_replies", "is_long", "TINYINT(1) NOT NULL DEFAULT 0");
         // 私信撤回
         ensureColumn("dm_messages", "is_recalled", "TINYINT(1) NOT NULL DEFAULT 0");
         // 收藏夹：旧库 users 表补 hide_favorites 列（默认 0 = 公开），并确保 post_favorites 表存在
@@ -223,11 +408,57 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("galgames", "reviewed_at", "DATETIME NULL");
         // 审核通过萌点奖励标记：每条 galgame 只发一次（防反复通过/拒绝刷萌点）
         ensureColumn("galgames", "moe_awarded", "TINYINT(1) NOT NULL DEFAULT 0");
+        // 关联会社：galgames 加 company_id 列（指向 companies 表，无外键约束，仅跳转用）
+        ensureColumn("galgames", "company_id", "BIGINT NULL");
+        // 「修改申请」影子行：四实体表补 apply_type（create/update）与 original_id（修改申请指向原记录）
+        // 用户在已上架（approved）记录上提交修改时，复制原记录为新行（apply_type='update'、original_id=原id、status='pending'）
+        ensureColumn("galgames", "apply_type", "VARCHAR(10) NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）'");
+        ensureColumn("galgames", "original_id", "BIGINT NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）'");
+        ensureIndex("galgames", "idx_galgames_original_id", "original_id");
+        ensureColumn("companies", "apply_type", "VARCHAR(10) NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）'");
+        ensureColumn("companies", "original_id", "BIGINT NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）'");
+        ensureIndex("companies", "idx_companies_original_id", "original_id");
+        ensureColumn("staffs", "apply_type", "VARCHAR(10) NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）'");
+        ensureColumn("staffs", "original_id", "BIGINT NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）'");
+        ensureIndex("staffs", "idx_staffs_original_id", "original_id");
+        ensureColumn("characters", "apply_type", "VARCHAR(10) NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）'");
+        ensureColumn("characters", "original_id", "BIGINT NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）'");
+        ensureIndex("characters", "idx_characters_original_id", "original_id");
         // 帖子投票：schema.sql 已建三表，这里兜底旧库
         ensurePollTables();
         // 萌点系统：旧库 users 表补 moe_points 列（默认 0），并确保 daily_rewards 防重表存在
         ensureColumn("users", "moe_points", "INT NOT NULL DEFAULT 0");
         ensureTableIfAbsent("daily_rewards", DAILY_REWARDS_DDL);
+        // Galgame 详情页评论：schema.sql 已建三表，这里兜底旧库
+        ensureGalgameReplyTables();
+        // 制作人员/角色库：schema.sql 已建六表，这里兜底旧库（并兜底补外键）
+        ensureStaffCharacterTables();
+        // Galgame-制作人员/角色关联的职责/定位描述：旧库 galgame_staff / galgame_character 补 description 列
+        ensureColumn("galgame_staff", "description", "VARCHAR(200) NULL COMMENT '制作人员在作品中的职责/备注'");
+        ensureColumn("galgame_character", "description", "VARCHAR(200) NULL COMMENT '角色在作品中的定位/备注'");
+        // Galgame 标签系统：确保 tags / galgame_tag 表存在（schema.sql 已建，这里兜底旧库）
+        ensureTableIfAbsent("tags", TAGS_DDL);
+        ensureTableIfAbsent("galgame_tag", GALGAME_TAG_DDL);
+        ensureFk("tags", "fk_tags_user", "FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL");
+        ensureFk("galgame_tag", "fk_gt_galgame", "FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        ensureFk("galgame_tag", "fk_gt_tag", "FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE");
+        // 画廊多图 + 相关系列：schema.sql 已建两张新表，这里兜底旧库（并兜底补外键）
+        ensureTableIfAbsent("galgame_images", GALGAME_IMAGES_DDL);
+        ensureTableIfAbsent("galgame_related", GALGAME_RELATED_DDL);
+        ensureFk("galgame_images", "fk_gi_galgame", "FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        ensureFk("galgame_related", "fk_gr_galgame", "FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        ensureFk("galgame_related", "fk_gr_related", "FOREIGN KEY (related_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        // 分类与标签彻底分离：清理之前播种的 gg-* 标签实体（alias IS NOT NULL），
+        // 其迁入 galgame_tag 的旧分类关联由 tags 的 FK ON DELETE CASCADE 级联删除；
+        // 旧分类系统 galgame_tags 表（galgame_id, section_key）保留不删，读写走 GalgameDao。
+        // 幂等：重复启动无副作用（首次清理后已无 alias 标签）。
+        jdbcTemplate.update("DELETE FROM tags WHERE alias IS NOT NULL");
+
+        // 条目贡献者：确保 entity_contributors 表存在（schema.sql 已建，这里兜底旧库）+ FK + 存量回填。
+        // 复合主键 (entry_type, entry_id, user_id) 天然防同一人重复贡献；用户删号由 FK ON DELETE CASCADE 级联清理。
+        ensureTableIfAbsent("entity_contributors", ENTITY_CONTRIBUTORS_DDL);
+        ensureFk("entity_contributors", "fk_ec_user", "FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE");
+        backfillEntityContributors();
 
         recomputeLikeCounts();
     }
@@ -265,6 +496,38 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureTableIfAbsent("poll_votes", POLL_VOTES_DDL);
     }
 
+    /**
+     * Galgame 详情页评论：确保 galgame_replies / galgame_reply_likes / galgame_reply_dislikes 三张表存在
+     * （schema.sql 会建，这里兜底旧库）。无历史结构，只需建表（同投票表）。
+     */
+    private void ensureGalgameReplyTables() {
+        ensureTableIfAbsent("galgame_replies", GALGAME_REPLIES_DDL);
+        ensureTableIfAbsent("galgame_reply_likes", GALGAME_REPLY_LIKES_DDL);
+        ensureTableIfAbsent("galgame_reply_dislikes", GALGAME_REPLY_DISLIKES_DDL);
+    }
+
+    /**
+     * 制作人员/角色库：确保 staffs / characters / galgame_staff / galgame_character / staff_character 五张表存在
+     * （schema.sql 会建，这里兜底旧库）；再兜底补外键（表已存在但缺约束时补上，幂等）。
+     */
+    private void ensureStaffCharacterTables() {
+        ensureTableIfAbsent("staffs", STAFFS_DDL);
+        ensureTableIfAbsent("characters", CHARACTERS_DDL);
+        ensureColumn("staffs", "image", "VARCHAR(500) NULL COMMENT '封面图 URL'");
+        ensureColumn("characters", "image", "VARCHAR(500) NULL COMMENT '封面图 URL'");
+        ensureTableIfAbsent("galgame_staff", GALGAME_STAFF_DDL);
+        ensureTableIfAbsent("galgame_character", GALGAME_CHARACTER_DDL);
+        ensureTableIfAbsent("staff_character", STAFF_CHARACTER_DDL);
+        ensureFk("staffs", "fk_staffs_user", "FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL");
+        ensureFk("characters", "fk_characters_user", "FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL");
+        ensureFk("galgame_staff", "fk_gs_galgame", "FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        ensureFk("galgame_staff", "fk_gs_staff", "FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE");
+        ensureFk("galgame_character", "fk_gc_galgame", "FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE");
+        ensureFk("galgame_character", "fk_gc_character", "FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE");
+        ensureFk("staff_character", "fk_sc_staff", "FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE");
+        ensureFk("staff_character", "fk_sc_character", "FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE");
+    }
+
     private void ensureTableIfAbsent(String table, String createDdl) {
         Integer exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.TABLES "
@@ -280,7 +543,8 @@ public class DatabaseMigrator implements ApplicationRunner {
      * <ul>
      *   <li>旧库 galgames.rating(DECIMAL(3,1)，未使用过) 迁移为 rating_avg(DECIMAL(4,2)，存精确两位小数)，新库直接建；</li>
      *   <li>新增 rating_count(评分人数)；</li>
-     *   <li>确保 galgame_ratings 防重表存在（schema.sql 已建，这里兜底旧库），只存 (galgame_id, user_id) 不含分数。</li>
+     *   <li>确保 galgame_ratings 防重表存在（schema.sql 已建，这里兜底旧库），主键 (galgame_id, user_id) 一人一票；</li>
+     *   <li>补 score 列存该用户评分（详情页已评分回显）；存量旧记录 score 为 NULL（当时未存分数，无法回补）。</li>
      * </ul>
      */
     private void migrateGalgameRating() {
@@ -293,6 +557,8 @@ public class DatabaseMigrator implements ApplicationRunner {
         }
         ensureColumn("galgames", "rating_count", "INT NOT NULL DEFAULT 0");
         ensureLikeTable("galgame_ratings", GALGAME_RATINGS_DDL);
+        // 评分回显：galgame_ratings 补 score 列（旧记录为 NULL，新评分写入分数）
+        ensureColumn("galgame_ratings", "score", "DECIMAL(3,1) NULL");
     }
 
     private void ensureColumn(String table, String column, String ddl) {
@@ -358,6 +624,26 @@ public class DatabaseMigrator implements ApplicationRunner {
                 "UPDATE replies r JOIN replies p ON r.parent_id = p.id "
                         + "SET r.parent_author = p.author "
                         + "WHERE r.parent_author IS NULL AND r.parent_id IS NOT NULL");
+    }
+
+    /**
+     * 条目贡献者存量回填：四实体表已有创建者（created_by IS NOT NULL）的行 INSERT IGNORE 进 entity_contributors
+     * （entry_type 分别 'galgame'/'company'/'staff'/'character'，entry_id=id，user_id=created_by，created_at=原 created_at）。
+     * 幂等：INSERT IGNORE + 复合主键，重复启动不会插入重复贡献行。
+     */
+    private void backfillEntityContributors() {
+        jdbcTemplate.update(
+                "INSERT IGNORE INTO entity_contributors (entry_type, entry_id, user_id, created_at) "
+                        + "SELECT 'galgame', id, created_by, created_at FROM galgames WHERE created_by IS NOT NULL");
+        jdbcTemplate.update(
+                "INSERT IGNORE INTO entity_contributors (entry_type, entry_id, user_id, created_at) "
+                        + "SELECT 'company', id, created_by, created_at FROM companies WHERE created_by IS NOT NULL");
+        jdbcTemplate.update(
+                "INSERT IGNORE INTO entity_contributors (entry_type, entry_id, user_id, created_at) "
+                        + "SELECT 'staff', id, created_by, created_at FROM staffs WHERE created_by IS NOT NULL");
+        jdbcTemplate.update(
+                "INSERT IGNORE INTO entity_contributors (entry_type, entry_id, user_id, created_at) "
+                        + "SELECT 'character', id, created_by, created_at FROM characters WHERE created_by IS NOT NULL");
     }
 
     private boolean columnExists(String table, String column) {

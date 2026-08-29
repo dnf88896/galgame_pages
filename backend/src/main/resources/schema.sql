@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS replies (
     user_id     BIGINT       NULL,
     author      VARCHAR(32)  NOT NULL DEFAULT '匿名',
     content     TEXT         NOT NULL,
+    images      TEXT         NULL COMMENT '评论图片URL的JSON数组',
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     like_count  INT          NOT NULL DEFAULT 0,
     dislike_count INT        NOT NULL DEFAULT 0 COMMENT '点踩数（与点赞独立，不互斥）',
@@ -213,7 +214,8 @@ CREATE TABLE IF NOT EXISTS galgames (
     name        VARCHAR(200) NOT NULL COMMENT 'Galgame 名称',
     description TEXT         NULL COMMENT '简介',
     image       VARCHAR(500) NULL COMMENT '封面图 URL（本地上传 /uploads/galgame_images/ 或外部链接）',
-    staff       VARCHAR(500) NULL COMMENT '制作人员 / 会社',
+    staff       VARCHAR(500) NULL COMMENT '制作人员 / 会社（存公司名快照用于展示/搜索；有公司关联时=公司名）',
+    company_id  BIGINT       NULL COMMENT '关联会社 id（companies 表，无外键约束，仅跳转用；NULL=未关联会社）',
     view_count  INT          NOT NULL DEFAULT 0 COMMENT '总浏览数（详情页访问 +1）',
     release_date DATE        NULL COMMENT '发售日期',
     rating_avg   DECIMAL(4,2) NULL COMMENT '评分平均分（用户评分汇总，管理员不可写）',
@@ -226,8 +228,11 @@ CREATE TABLE IF NOT EXISTS galgames (
     reject_reason VARCHAR(500) NULL COMMENT '拒绝理由',
     reviewed_at DATETIME     NULL COMMENT '审核时间',
     moe_awarded TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '审核通过萌点奖励是否已发放（每条只奖一次）',
+    apply_type  VARCHAR(10)  NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）',
+    original_id BIGINT       NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）',
     PRIMARY KEY (id),
     KEY idx_galgames_name (name),
+    KEY idx_galgames_original_id (original_id),
     CONSTRAINT fk_galgames_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
@@ -243,13 +248,81 @@ CREATE TABLE IF NOT EXISTS galgame_tags (
 -- Galgame 评分防重：只记录「谁评过」（不含分数），防止同一用户重复评分刷分。
 -- 平均分 / 人数增量维护在 galgames.rating_avg / rating_count（新评分 = (旧平均×人数 + 新分) / (人数+1)）。
 CREATE TABLE IF NOT EXISTS galgame_ratings (
-    galgame_id  BIGINT      NOT NULL,
-    user_id     BIGINT      NOT NULL,
-    created_at  DATETIME    DEFAULT CURRENT_TIMESTAMP,
+    galgame_id  BIGINT          NOT NULL,
+    user_id     BIGINT          NOT NULL,
+    score       DECIMAL(3,1)    NULL COMMENT '该用户评分（0~10，0.5 步进）；详情页已评分回显；历史记录为 NULL 表示当时未存分数',
+    created_at  DATETIME        DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (galgame_id, user_id),
     KEY idx_galgame_ratings_user (user_id),
     CONSTRAINT fk_galgame_ratings_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
     CONSTRAINT fk_galgame_ratings_user    FOREIGN KEY (user_id)    REFERENCES users (id)    ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 详情页评论：仿 replies 表，但无 is_pinned 列（本轮不做评论置顶）。
+CREATE TABLE IF NOT EXISTS galgame_replies (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    galgame_id  BIGINT       NOT NULL,
+    user_id     BIGINT       NULL,
+    author      VARCHAR(32)  NOT NULL DEFAULT '匿名',
+    content     TEXT         NOT NULL,
+    is_long     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1=长评(>300字)，0=短评',
+    images      TEXT         NULL COMMENT '评论图片URL的JSON数组',
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    like_count  INT          NOT NULL DEFAULT 0,
+    dislike_count INT        NOT NULL DEFAULT 0 COMMENT '点踩数（与点赞独立，不互斥）',
+    parent_id   BIGINT       NULL,
+    parent_author VARCHAR(32) NULL COMMENT '父评论作者名快照：父评论删除后子评论仍能显示「回复 @xx」引用',
+    PRIMARY KEY (id),
+    KEY idx_galgame_replies_galgame (galgame_id),
+    KEY idx_galgame_replies_user (user_id),
+    KEY idx_galgame_replies_parent (parent_id),
+    CONSTRAINT fk_galgame_replies_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_galgame_replies_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_galgame_replies_parent FOREIGN KEY (parent_id) REFERENCES galgame_replies (id) ON DELETE SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 评论点赞表：结构同 reply_likes。
+CREATE TABLE IF NOT EXISTS galgame_reply_likes (
+    reply_id    BIGINT       NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (reply_id, user_id),
+    CONSTRAINT fk_galgame_reply_likes_reply FOREIGN KEY (reply_id) REFERENCES galgame_replies (id) ON DELETE CASCADE,
+    CONSTRAINT fk_galgame_reply_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 评论点踩表：与点赞独立，结构同 galgame_reply_likes。
+CREATE TABLE IF NOT EXISTS galgame_reply_dislikes (
+    reply_id    BIGINT       NOT NULL,
+    user_id     BIGINT       NOT NULL,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (reply_id, user_id),
+    CONSTRAINT fk_galgame_reply_dislikes_reply FOREIGN KEY (reply_id) REFERENCES galgame_replies (id) ON DELETE CASCADE,
+    CONSTRAINT fk_galgame_reply_dislikes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 会社（制作公司）库：普通用户提交 → 管理员审核（仿 galgames 提交审核）。
+-- 详情页访问浏览数 +1；审核通过给提交者 +10 萌点（moe_awarded 按条只奖一次）。
+CREATE TABLE IF NOT EXISTS companies (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(200) NOT NULL COMMENT '会社名称',
+    description TEXT         NULL COMMENT '简介',
+    website     VARCHAR(500) NULL COMMENT '官网 URL',
+    logo_image  VARCHAR(500) NULL COMMENT 'Logo 图 URL（预留，暂未开放上传）',
+    view_count  INT          NOT NULL DEFAULT 0 COMMENT '总浏览数（详情页访问 +1）',
+    created_by  BIGINT       NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'approved' COMMENT '状态：approved已上架/pending待审核/rejected已拒绝',
+    reject_reason VARCHAR(500) NULL COMMENT '拒绝理由',
+    reviewed_at DATETIME     NULL COMMENT '审核时间',
+    moe_awarded TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '审核通过萌点奖励是否已发放（每条只奖一次）',
+    apply_type  VARCHAR(10)  NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）',
+    original_id BIGINT       NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）',
+    PRIMARY KEY (id),
+    KEY idx_companies_name (name),
+    KEY idx_companies_original_id (original_id),
+    CONSTRAINT fk_companies_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 收藏夹：用户收藏帖子（user_id 收藏 post_id），公开可见，可选隐藏（users.hide_favorites）。
@@ -263,12 +336,12 @@ CREATE TABLE IF NOT EXISTS post_favorites (
     CONSTRAINT fk_post_favorites_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
--- 举报：用户举报帖子或评论。target_type 区分 post/reply；同一举报人对同一目标只记一条（UNIQUE）。
+-- 举报：用户举报帖子、帖子评论或 Galgame 评论。target_type 区分 post/reply/greply；同一举报人对同一目标只记一条（UNIQUE）。
 -- status：0=待处理，1=已删除，2=已忽略；result 为处理结果（用于通知举报人）。
 CREATE TABLE IF NOT EXISTS reports (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
     reporter_id BIGINT       NOT NULL COMMENT '举报人',
-    target_type VARCHAR(10)  NOT NULL DEFAULT 'post' COMMENT 'post=帖子 / reply=评论',
+    target_type VARCHAR(10)  NOT NULL DEFAULT 'post' COMMENT 'post=帖子 / reply=评论 / greply=Galgame评论',
     target_id   BIGINT       NOT NULL COMMENT '被举报目标 id',
     reason      VARCHAR(200) NULL COMMENT '举报原因（可选）',
     status      TINYINT      NOT NULL DEFAULT 0 COMMENT '0=待处理，1=已删除，2=已忽略',
@@ -347,4 +420,162 @@ CREATE TABLE IF NOT EXISTS daily_rewards (
     UNIQUE KEY uk_daily_user_action (user_id, action_type, action_date),
     KEY idx_daily_user_date (user_id, action_date),
     CONSTRAINT fk_daily_rewards_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 制作人员库：普通用户提交 → 管理员审核（仿 companies 提交审核）。
+-- 详情页访问浏览数 +1；审核通过给提交者 +10 萌点（moe_awarded 按条只奖一次）。
+-- 与角色通过 staff_character 多对多关联。
+CREATE TABLE IF NOT EXISTS staffs (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(200) NOT NULL COMMENT '制作人员名称',
+    description TEXT         NULL COMMENT '简介',
+    image       VARCHAR(500) NULL COMMENT '封面图 URL',
+    view_count  INT          NOT NULL DEFAULT 0 COMMENT '总浏览数（详情页访问 +1）',
+    created_by  BIGINT       NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'approved' COMMENT '状态：approved已上架/pending待审核/rejected已拒绝',
+    reject_reason VARCHAR(500) NULL COMMENT '拒绝理由',
+    reviewed_at DATETIME     NULL COMMENT '审核时间',
+    moe_awarded TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '审核通过萌点奖励是否已发放（每条只奖一次）',
+    apply_type  VARCHAR(10)  NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）',
+    original_id BIGINT       NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）',
+    PRIMARY KEY (id),
+    KEY idx_staffs_name (name),
+    KEY idx_staffs_status (status),
+    KEY idx_staffs_original_id (original_id),
+    CONSTRAINT fk_staffs_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 角色库：普通用户提交 → 管理员审核（仿 staffs / companies 提交审核）。
+-- 与制作人员通过 staff_character 多对多关联。
+CREATE TABLE IF NOT EXISTS characters (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(200) NOT NULL COMMENT '角色名称',
+    description TEXT         NULL COMMENT '简介',
+    image       VARCHAR(500) NULL COMMENT '封面图 URL',
+    view_count  INT          NOT NULL DEFAULT 0 COMMENT '总浏览数（详情页访问 +1）',
+    created_by  BIGINT       NULL,
+    created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status      VARCHAR(20)  NOT NULL DEFAULT 'approved' COMMENT '状态：approved已上架/pending待审核/rejected已拒绝',
+    reject_reason VARCHAR(500) NULL COMMENT '拒绝理由',
+    reviewed_at DATETIME     NULL COMMENT '审核时间',
+    moe_awarded TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '审核通过萌点奖励是否已发放（每条只奖一次）',
+    apply_type  VARCHAR(10)  NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）',
+    original_id BIGINT       NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）',
+    PRIMARY KEY (id),
+    KEY idx_characters_name (name),
+    KEY idx_characters_status (status),
+    KEY idx_characters_original_id (original_id),
+    CONSTRAINT fk_characters_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame-制作人员多对多：一作可关联多个制作人员，一个制作人员可参与多作。
+CREATE TABLE IF NOT EXISTS galgame_staff (
+    galgame_id  BIGINT       NOT NULL,
+    staff_id    BIGINT       NOT NULL,
+    description VARCHAR(200) NULL COMMENT '制作人员在作品中的职责/备注',
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, staff_id),
+    KEY idx_gs_staff (staff_id),
+    CONSTRAINT fk_gs_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_gs_staff FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame-角色多对多：一作可关联多个角色，一个角色可出现在多作。
+CREATE TABLE IF NOT EXISTS galgame_character (
+    galgame_id   BIGINT       NOT NULL,
+    character_id BIGINT       NOT NULL,
+    description  VARCHAR(200) NULL COMMENT '角色在作品中的定位/备注',
+    created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, character_id),
+    KEY idx_gc_character (character_id),
+    CONSTRAINT fk_gc_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_gc_character FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 制作人员-角色多对多：一个制作人员可演绎多个角色，一个角色可被多个制作人员演绎。
+CREATE TABLE IF NOT EXISTS staff_character (
+    staff_id     BIGINT       NOT NULL,
+    character_id BIGINT       NOT NULL,
+    created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (staff_id, character_id),
+    KEY idx_sc_character (character_id),
+    CONSTRAINT fk_sc_staff FOREIGN KEY (staff_id) REFERENCES staffs (id) ON DELETE CASCADE,
+    CONSTRAINT fk_sc_character FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 标签实体库（Galgame 标签系统）：普通用户提交 → 管理员审核（仿 staffs / companies 提交审核）。
+-- name 唯一（中文标签名）；alias 为旧 gg-* section_key 别名（播种/迁移兼容用，不在前端展示）；
+-- category 七枚举：type资源类型/language语言/platform平台/content游戏内容/meta作品属性/technical技术细节/sexual成人内容；
+-- spoiler_level 剧透级 0无/1轻微/2严重；status 审核状态（approved已上架/pending待审核/rejected已拒绝）；
+-- moe_awarded 审核通过萌点奖励是否已发放（每条只奖一次）。
+CREATE TABLE IF NOT EXISTS tags (
+    id            BIGINT       NOT NULL AUTO_INCREMENT,
+    name          VARCHAR(50)  NOT NULL COMMENT '标签名称（唯一，中文）',
+    alias         VARCHAR(50)  NULL COMMENT '旧 section_key 别名（gg-*），播种迁移/兼容用',
+    category      VARCHAR(20)  NOT NULL DEFAULT 'content' COMMENT 'type资源类型/language语言/platform平台/content游戏内容/meta作品属性/technical技术细节/sexual成人内容',
+    spoiler_level INT          NOT NULL DEFAULT 0 COMMENT '剧透等级：0无剧透/1轻微剧透/2严重剧透',
+    description   VARCHAR(200) NULL COMMENT '标签说明',
+    created_by    BIGINT       NULL,
+    created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status        VARCHAR(20)  NOT NULL DEFAULT 'approved' COMMENT 'approved/pending/rejected',
+    reject_reason VARCHAR(500) NULL,
+    reviewed_at   DATETIME     NULL,
+    moe_awarded   TINYINT(1)   NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_tags_name (name),
+    KEY idx_tags_category (category),
+    KEY idx_tags_status (status),
+    CONSTRAINT fk_tags_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame-标签多对多（替代旧 galgame_tags，旧表保留不删）：一作可挂多标签，一标签可被多作使用。
+CREATE TABLE IF NOT EXISTS galgame_tag (
+    galgame_id BIGINT   NOT NULL,
+    tag_id     BIGINT   NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, tag_id),
+    KEY idx_gt_tag (tag_id),
+    CONSTRAINT fk_gt_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_gt_tag FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 画廊多图：一作可传多张图（封面图仍存 galgames.image 单图），sort_order 排序（先插先显示）。
+CREATE TABLE IF NOT EXISTS galgame_images (
+    id         BIGINT       NOT NULL AUTO_INCREMENT,
+    galgame_id BIGINT       NOT NULL,
+    url        VARCHAR(500) NOT NULL COMMENT '图片相对 URL（/uploads/galgame_images/...）',
+    sort_order INT          NOT NULL DEFAULT 0,
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_gi_galgame (galgame_id),
+    CONSTRAINT fk_gi_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 相关系列：一作可关联多作（双向跳转），仅关联已上架作品；主键 (galgame_id, related_id) 防重复关联。
+CREATE TABLE IF NOT EXISTS galgame_related (
+    galgame_id BIGINT   NOT NULL,
+    related_id BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, related_id),
+    KEY idx_gr_related (related_id),
+    CONSTRAINT fk_gr_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_gr_related FOREIGN KEY (related_id) REFERENCES galgames (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 条目贡献者：记录谁贡献了 galgame / company / staff / character 条目
+-- （创建者 / 修改申请提交者 / 管理员原地直改都被记为贡献者）。
+-- 复合主键 (entry_type, entry_id, user_id) 天然防同一人重复贡献；用户删号由 FK ON DELETE CASCADE 级联清理；
+-- 删除条目时由 Controller 显式清理贡献者记录（与 galgame_images 删除行为一致，不依赖级联）。
+CREATE TABLE IF NOT EXISTS entity_contributors (
+    entry_type VARCHAR(20) NOT NULL COMMENT '条目类型：galgame/company/staff/character',
+    entry_id   BIGINT      NOT NULL COMMENT '条目 id（对应各实体表主键）',
+    user_id    BIGINT      NOT NULL COMMENT '贡献者用户 id',
+    created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '贡献时间',
+    PRIMARY KEY (entry_type, entry_id, user_id),
+    KEY idx_ec_entry (entry_type, entry_id),
+    CONSTRAINT fk_ec_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

@@ -5,7 +5,15 @@
         <div class="gal-header-row">
           <button class="gal-back-btn" @click="goHome">← 返回首页</button>
           <div class="gal-header-actions">
-            <button v-if="isAdmin" class="gal-review-btn" @click="router.push('/galgame/review')">审核galgame信息</button>
+            <!-- 审核按钮红点：管理员有待审条目时在右上角显示数量徽标（无则隐藏） -->
+            <el-badge
+              v-if="isAdmin"
+              :value="reviewCount?.galgame ?? 0"
+              :hidden="!isAdmin || !(reviewCount?.galgame > 0)"
+              :max="99"
+            >
+              <button class="gal-review-btn" @click="router.push('/galgame/review')">审核galgame信息</button>
+            </el-badge>
             <button v-if="isLoggedIn" class="gal-mine-btn" @click="router.push('/galgame/mine')">我的提交</button>
             <button v-if="isLoggedIn" class="gal-add-btn" @click="router.push('/galgame/new')">+ 添加galgame</button>
           </div>
@@ -13,6 +21,26 @@
         <h1 class="gal-title">Galgame 资源</h1>
         <p class="gal-subtitle">Galgame 资源页面，提供各类 Galgame 下载。按类型 / 语言 / 平台 / 作品分类筛选。</p>
       </header>
+
+      <!-- 搜索：可选作品名 / 会社（制作人员），与筛选、排序可叠加 -->
+      <div class="gal-search">
+        <el-select v-model="searchField" class="gal-search-select" @change="onSearchFieldChange">
+          <el-option value="name" label="作品名" />
+          <el-option value="staff" label="会社" />
+        </el-select>
+        <el-input
+          v-model="searchWord"
+          class="gal-search-input"
+          placeholder="输入关键词搜索…"
+          clearable
+          @keyup.enter="load"
+          @clear="load"
+        >
+          <template #append>
+            <el-button @click="load">搜索</el-button>
+          </template>
+        </el-input>
+      </div>
 
       <div class="gal-filters">
         <!-- 排序行：总浏览数 / 创建顺序 / 发售日期 / 评分；发售日期两态切换，右侧紧跟方向箭头 -->
@@ -82,7 +110,8 @@
               <div class="gal-card-head">
                 <h2 class="gal-name">{{ p.name }}</h2>
                 <div class="gal-tags">
-                  <span v-for="k in (p.tags || [])" :key="k" class="gal-tag">#{{ sectionLabel(tagCategories, k) || k }}</span>
+                  <span v-for="c in (p.categories || []).slice(0, 4)" :key="c" class="gal-tag">{{ categoryLabel(c) }}</span>
+                  <span v-if="(p.categories || []).length > 4" class="gal-tag">+{{ (p.categories || []).length - 4 }}</span>
                 </div>
               </div>
               <p v-if="p.staff" class="gal-staff">{{ p.staff }}</p>
@@ -119,8 +148,9 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
-import { fetchTagStructure, sectionLabel, getErrorMessage, resolveAssetUrl } from '../utils/format'
+import { getErrorMessage, resolveAssetUrl } from '../utils/format'
 import { user } from '../store/user'
+import { GALGAME_CATEGORIES, CATEGORY_GROUPS, categoryLabel } from '../constants/galgameCategory'
 
 const router = useRouter()
 
@@ -130,29 +160,40 @@ const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
 // 登录用户（有 id）才显示「添加galgame」入口
 const isLoggedIn = computed(() => !!user.value?.id)
 
-// 四行筛选配置（仿 kungal，行序一致：类型 / 语言 / 平台 / 作品；单选）：
-// key 对应 filters 里的字段；prefix 是 galgame-resource 大类下小分支 key 的前缀
-const ROWS = [
-  { key: 'type', name: '类型', allLabel: '全部类型', prefix: 'gg-type-' },
-  { key: 'lang', name: '语言', allLabel: '全部语言', prefix: 'gg-lang-' },
-  { key: 'plat', name: '平台', allLabel: '全部平台', prefix: 'gg-plat-' },
-  { key: 'work', name: '作品', allLabel: '全部作品', prefix: 'gg-work-' },
-]
+// 待审核数量红点：管理员可见（GET /api/review/pending-count → { galgame, company, staff, character, total }）
+const reviewCount = ref(null)
 
-// 每行选项：从 galgame-resource 大类下按 prefix 分组，第一个是 allLabel（value='' 表示不筛选）
-const rows = computed(() => {
-  const gal = (tagCategories.value || []).find((c) => c && c.key === 'galgame-resource')
-  const sections = Array.isArray(gal?.sections) ? gal.sections : []
-  return ROWS.map((row) => ({
-    ...row,
-    options: sections
-      .filter((s) => s && s.key && s.key.startsWith(row.prefix))
-      .map((s) => ({ key: s.key, label: s.label })),
-  }))
-})
+async function loadReviewCount() {
+  try {
+    const { data } = await api.get('/review/pending-count')
+    reviewCount.value = data && typeof data === 'object' ? data : null
+  } catch (e) {
+    // 拉取失败静默：红点不显示，不影响列表
+    reviewCount.value = null
+  }
+}
+
+// 四行筛选配置：由 CATEGORY_GROUPS 构建（行序一致：类型 / 语言 / 平台 / 作品分类），
+// options 从 GALGAME_CATEGORIES 按 group 生成（值=section_key；value='' 表示不筛选）
+const rows = computed(() =>
+  CATEGORY_GROUPS.map((g) => ({
+    key: g.key,
+    name: g.name,
+    allLabel: g.allLabel,
+    options: GALGAME_CATEGORIES.filter((c) => c.group === g.key).map((c) => ({ key: c.key, label: c.label })),
+  })),
+)
 
 const filters = reactive({ type: '', lang: '', plat: '', work: '' })
-const tagCategories = ref([])
+
+// 搜索：field=name 按作品名 / field=staff 按会社（制作人员）；关键词与筛选、排序可叠加
+const searchField = ref('name')
+const searchWord = ref('')
+
+// 切换搜索字段时若已有关键词立即重搜
+function onSearchFieldChange() {
+  if (searchWord.value.trim()) load()
+}
 
 // 排序：created 默认（管理员添加顺序，最新在上）/ views 总浏览数 /
 // rating 评分 / release_date 发售日期——后三个都是两态切换：
@@ -202,8 +243,8 @@ function sortArrowOf(val) {
 
 const hasFilter = computed(() => Object.values(filters).some((v) => v !== ''))
 
-// 所有非空筛选值 → 后端按 tags=a&tags=b 多标签 AND 过滤
-const selectedSections = computed(() => Object.values(filters).filter((v) => v !== ''))
+// 所有非空筛选值（section_key）→ 后端按 categories=a&categories=b 多分类 AND 过滤
+const selectedCategories = computed(() => Object.values(filters).filter((v) => v !== ''))
 
 const galgames = ref([])
 const loading = ref(false)
@@ -230,7 +271,12 @@ async function load() {
   loadError.value = ''
   try {
     const { data } = await api.get('/galgames', {
-      params: { tags: selectedSections.value, sort: sortBy.value },
+      params: {
+        categories: selectedCategories.value,
+        sort: sortBy.value,
+        q: searchWord.value.trim() || undefined,
+        field: searchField.value,
+      },
       paramsSerializer: galParamsSerializer,
     })
     galgames.value = Array.isArray(data) ? data : []
@@ -257,10 +303,6 @@ function resetFilters() {
   filters.work = ''
 }
 
-async function loadTagStructure() {
-  tagCategories.value = await fetchTagStructure()
-}
-
 function openLink(url) {
   if (!url) return
   window.open(url, '_blank', 'noopener')
@@ -285,11 +327,11 @@ const emptyDesc = computed(() =>
 )
 
 // 筛选变化、首次进入都重新拉列表
-watch(selectedSections, load)
+watch(selectedCategories, load)
 
 onMounted(() => {
-  loadTagStructure()
   load()
+  if (isAdmin.value) loadReviewCount()
 })
 </script>
 
@@ -381,6 +423,18 @@ onMounted(() => {
   color: #888;
   font-size: 14px;
   margin: 0;
+}
+.gal-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.gal-search-select {
+  width: 110px;
+  flex-shrink: 0;
+}
+.gal-search-input {
+  flex: 1;
 }
 .gal-filters {
   background: #fff;

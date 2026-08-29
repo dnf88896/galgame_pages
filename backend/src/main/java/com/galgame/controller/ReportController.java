@@ -22,11 +22,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.galgame.auth.AuthContext;
+import com.galgame.dao.GalgameReplyDao;
 import com.galgame.dao.NotificationDao;
 import com.galgame.dao.PostDao;
 import com.galgame.dao.ReplyDao;
 import com.galgame.dao.ReportDao;
 import com.galgame.dao.UserDao;
+import com.galgame.model.GalgameReply;
 import com.galgame.model.Post;
 import com.galgame.model.Reply;
 import com.galgame.model.User;
@@ -44,14 +46,16 @@ public class ReportController {
     private final ReportDao reportDao;
     private final PostDao postDao;
     private final ReplyDao replyDao;
+    private final GalgameReplyDao galgameReplyDao;
     private final UserDao userDao;
     private final NotificationDao notificationDao;
 
-    public ReportController(ReportDao reportDao, PostDao postDao, ReplyDao replyDao, UserDao userDao,
-                            NotificationDao notificationDao) {
+    public ReportController(ReportDao reportDao, PostDao postDao, ReplyDao replyDao, GalgameReplyDao galgameReplyDao,
+                            UserDao userDao, NotificationDao notificationDao) {
         this.reportDao = reportDao;
         this.postDao = postDao;
         this.replyDao = replyDao;
+        this.galgameReplyDao = galgameReplyDao;
         this.userDao = userDao;
         this.notificationDao = notificationDao;
     }
@@ -211,6 +215,13 @@ public class ReportController {
             deletePostAttachmentFiles(row.targetId());
             return p.get().userId();
         }
+        // Galgame 评论（greply）：子评论 parent_id 由外键 ON DELETE SET NULL 自动置空；赞/踩由外键级联删除
+        if ("greply".equals(row.targetType())) {
+            Optional<GalgameReply> gr = galgameReplyDao.findById(row.targetId());
+            if (gr.isEmpty()) return null;
+            galgameReplyDao.deleteById(row.targetId());
+            return gr.get().userId();
+        }
         Optional<Reply> r = replyDao.findById(row.targetId());
         if (r.isEmpty()) return null;
         replyDao.deleteById(row.targetId());
@@ -235,6 +246,8 @@ public class ReportController {
                     : Map.of("id", row.targetId(), "title", row.postTitle()));
             m.put("reply", row.replyPostId() == null ? null
                     : Map.of("id", row.targetId(), "content", row.replyContent(), "post_id", row.replyPostId()));
+            m.put("greply", row.galgameReplyContent() == null ? null
+                    : Map.of("id", row.targetId(), "content", row.galgameReplyContent()));
             return m;
         }).toList();
     }

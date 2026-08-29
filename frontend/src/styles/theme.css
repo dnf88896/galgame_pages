@@ -431,6 +431,69 @@ html.dark .gal-detail-desc {
   color: #c0c4cc;
 }
 
+/* ---- 5.11b 详情页 tab 区（制作人员 / 角色 / 评论 同级切换）---- */
+/* tab 按钮 + 内容 pane：白底 → 深灰（.gal-section-tab.active 主色蓝浅深一致，不覆盖） */
+html.dark .gal-section-pane,
+html.dark .gal-section-tab {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+}
+
+/* tab 按钮文字：#606266 → 提亮 */
+html.dark .gal-section-tab {
+  color: #c0c4cc;
+}
+
+/* tab hover：主色文字 + 深灰底 */
+html.dark .gal-section-tab:hover {
+  color: #409eff;
+  border-color: #409eff;
+  background: #2a2a2c;
+}
+
+/* 内容区投影：过亮的浅色投影 → 深色投影 */
+html.dark .gal-section-pane {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 描述 / 空态文字：#909399 → 提亮 */
+html.dark .gal-relation-desc,
+html.dark .gal-section-empty {
+  color: #8c8c90;
+}
+
+/* ---- 5.11c 详情页画廊 + 相关系列（深色覆盖） ---- */
+/* 画廊图片未加载占底 + 相关系列容器卡片 → 深灰 */
+html.dark .gal-gallery-item img {
+  background: #2a2a2c;
+}
+html.dark .gal-related-section {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+/* 相关系列标题主文字 */
+html.dark .gal-related-title {
+  color: #e5e6eb;
+}
+/* 相关系列封面区（无图占位）底色 */
+html.dark .gal-related-cover {
+  background: #2a2a2c;
+  border-color: #3a3a3c;
+}
+html.dark .gal-related-placeholder {
+  background: #2a2a2c;
+  color: #8c8c90;
+}
+/* 相关系列名称文字 */
+html.dark .gal-related-name {
+  color: #e5e6eb;
+}
+/* 画廊上传区分隔线：#f0f2f5 → 深灰 */
+html.dark .gal-gallery-upload {
+  border-top-color: #2a2a2c;
+}
+
 
 /* ---- 5.12 收藏（PostView 收藏按钮 + ProfileView 收藏统计 + FavoritesView 收藏夹页） ---- */
 /* 收藏按钮：白底 → 深灰 */
@@ -582,4 +645,282 @@ html.dark .mention-user {
 }
 html.dark .mention-none {
   color: #909399;
+}
+
+
+/* =====================================================================
+   5.14 Galgame 标签系统（标签区 / 标签 chip / 资源 chips / 标签库页 / 标签详情页）
+   ===================================================================== */
+
+/* ---- 资源 chips（详情信息卡 meta 区）：type 蓝 / language 灰 / platform 绿 ---- */
+html.dark .gal-resource-chip.res-type {
+  color: #66b1ff;
+  background: #1f3a5f;
+}
+html.dark .gal-resource-chip.res-language {
+  color: #a8abb2;
+  background: #2a2a2c;
+}
+html.dark .gal-resource-chip.res-platform {
+  color: #95d475;
+  background: rgba(103, 194, 58, 0.12);
+}
+
+/* ---- 详情页标签区 ---- */
+html.dark .gal-tag-section {
+  border-top-color: #2a2a2c;
+}
+html.dark .gal-tag-section-title,
+html.dark .tag-group-title,
+html.dark .works-title {
+  color: #e5e6eb;
+}
+
+/* 类别筛选 chip 组 */
+html.dark .gal-tag-filter-chip {
+  color: #c0c4cc;
+}
+html.dark .gal-tag-filter-chip:hover {
+  background: #2a2a2c;
+}
+html.dark .gal-tag-filter-chip.active {
+  background: #1f3a5f;
+  color: #409eff;
+}
+
+/* 剧透开关文字 */
+html.dark .gal-spoiler-toggle {
+  color: #8c8c90;
+}
+
+/* 标签 chip（内容/属性/技术/成人 + 资源类别）：浅蓝底 → 深蓝底，sexual 红 */
+html.dark .gal-tag-chip.cat-content,
+html.dark .gal-tag-chip.cat-type {
+  color: #66b1ff;
+  background: #1f3a5f;
+}
+html.dark .gal-tag-chip.cat-language {
+  color: #a8abb2;
+  background: #2a2a2c;
+}
+html.dark .gal-tag-chip.cat-platform,
+html.dark .gal-tag-chip.cat-meta,
+html.dark .gal-tag-chip.cat-technical {
+  color: #95d475;
+  background: rgba(103, 194, 58, 0.12);
+}
+html.dark .gal-tag-chip.cat-sexual {
+  color: #f56c9a;
+  background: rgba(245, 108, 154, 0.12);
+}
+
+/* 标签区空态 */
+html.dark .gal-tag-empty,
+html.dark .tag-lib-empty-text,
+html.dark .works-empty-text {
+  color: #8c8c90;
+}
+
+/* ---- 标签选择器（远程搜索 + 新建标签入口）---- */
+html.dark .tag-search-empty {
+  color: #66b1ff;
+}
+html.dark .tag-search-empty:hover {
+  background: #2a2a2c;
+}
+
+/* ---- 标签库页 ---- */
+html.dark .tag-lib-skel,
+html.dark .tag-group {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+}
+html.dark .tag-group {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- 标签详情页 ---- */
+html.dark .tag-detail-card {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+html.dark .tag-detail-name {
+  color: #e5e6eb;
+}
+html.dark .tag-detail-desc {
+  color: #c0c4cc;
+}
+html.dark .tag-detail-meta {
+  color: #8c8c90;
+}
+
+
+/* =====================================================================
+   5.15 审核 / 我的提交 卡片「创建/修改」标注
+   （浅色基线 + html.dark 深色覆盖；el-tag 类型色由 EP 暗色变量自动适配）
+   ===================================================================== */
+
+/* 名称行内联 flex：卡片标题 + 类型 tag（创建/修改）水平排列 */
+.gal-review-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 「修改自」来源行：橙色调弱化文字，与「修改」warning tag 语义一致 */
+.gal-origin-line {
+  color: #b88230;
+}
+html.dark .gal-origin-line {
+  color: #e6a23c;
+}
+
+
+/* =====================================================================
+   5.16 条目贡献者（详情页入口小字 + 贡献者列表页）
+   （浅色基线 + html.dark 深色覆盖）
+   ===================================================================== */
+
+/* 详情页信息卡 body 底部的「条目贡献者」入口小字 */
+.gal-contributors-link {
+  text-align: right;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909399;
+  cursor: pointer;
+}
+.gal-contributors-link:hover {
+  color: #409eff;
+}
+
+/* ---- 贡献者列表页：居中 max-width、白色卡、头像圆形、昵称粗体、时间小灰字、空态灰色居中 ---- */
+.gal-contributors-center {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 0;
+}
+.gal-contributors-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.gal-contributors-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+.gal-contributors-skel {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.gal-contributors-error {
+  margin-bottom: 16px;
+}
+.gal-contributors-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 4px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.gal-contributors-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #f0f2f5;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gal-contributors-item:last-child {
+  border-bottom: none;
+}
+.gal-contributors-item:hover {
+  background: #f5f7fa;
+}
+.gal-contributors-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #409eff;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gal-contributors-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.gal-contributors-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gal-contributors-nick {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.gal-contributors-username {
+  font-size: 13px;
+  color: #909399;
+}
+.gal-contributors-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #909399;
+}
+.gal-contributors-empty {
+  text-align: center;
+  padding: 64px 0;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  color: #909399;
+  font-size: 15px;
+}
+
+/* ---- 深色覆盖：卡 #1d1e1f / 边框 #3a3a3c / 文字 #e5eaf3 / 小灰字 #7f828a ---- */
+html.dark .gal-contributors-link {
+  color: #7f828a;
+}
+html.dark .gal-contributors-skel,
+html.dark .gal-contributors-card,
+html.dark .gal-contributors-empty {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+html.dark .gal-contributors-title,
+html.dark .gal-contributors-nick {
+  color: #e5eaf3;
+}
+html.dark .gal-contributors-item {
+  border-bottom-color: #2a2a2c;
+}
+html.dark .gal-contributors-item:hover {
+  background: #2a2a2c;
+}
+html.dark .gal-contributors-username,
+html.dark .gal-contributors-time,
+html.dark .gal-contributors-empty {
+  color: #7f828a;
 }
