@@ -100,8 +100,13 @@ async function load() {
   }
 }
 
+// 返回：有后退记录则回上一页；否则（直接打开本页/刷新）兜底回 TA 的资料页
 function goBack() {
-  router.push(`/user/${ownerId.value}`)
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push(`/user/${ownerId.value}`)
+  }
 }
 
 // 列表中该行是否就是当前登录用户自己（避免出现「关注自己」按钮）

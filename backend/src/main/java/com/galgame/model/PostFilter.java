@@ -9,7 +9,7 @@ import java.util.List;
  * 新增维度时：在此追加一个字段，在 {@code PostDao.findAll} 的条件拼接里加一段即可，
  * 接口签名（/api/posts?q=&category=&sort=）与前端调用方式保持不变。
  * <p>sections 支持多标签 AND 过滤：帖子须同时拥有所有指定标签，空列表不过滤。
- * <p>sort 取值：time（默认，时间倒序）/ hot（热度：view+reply*3+like*5 倒序）/ likes（点赞量倒序）/ following（只看我关注的人）。
+ * <p>sort 取值：time（默认，时间倒序）/ hot（热度：view+reply*3+like*5 倒序）/ likes（点赞量倒序）/ views（浏览数倒序）/ following（只看我关注的人）。
  */
 public record PostFilter(String q, String category, List<String> sections, String sort) {
 

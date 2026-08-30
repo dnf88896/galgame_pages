@@ -7,5 +7,11 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '127.0.0.1',
+    // 本地开发：/api 与 /uploads 转发到本地后端（前端 baseURL 默认同源相对路径，
+    // 无代理时 dev 5173 会把接口请求当 SPA 路由返回 index.html → Network Error）
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8081', changeOrigin: true },
+      '/uploads': { target: 'http://127.0.0.1:8081', changeOrigin: true },
+    },
   },
 })

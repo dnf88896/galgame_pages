@@ -79,6 +79,20 @@ public class UserDao {
         return jdbcTemplate.query("SELECT id FROM users", (rs, rowNum) -> rs.getLong("id"));
     }
 
+    /** 用户排行：按萌点从高到低分页（同分按 id 升序保持稳定），供用户排行页 */
+    public List<User> findAllOrderByMoe(int limit, int offset) {
+        return jdbcTemplate.query(
+                "SELECT id, username, nickname, avatar_url, bio, admin_level, hide_favorites, ban_until, moe_points, created_at "
+                        + "FROM users ORDER BY moe_points DESC, id ASC LIMIT ? OFFSET ?",
+                USER_ROW_MAPPER, limit, offset);
+    }
+
+    /** 用户总数（用户排行分页用） */
+    public int countAll() {
+        Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class);
+        return count == null ? 0 : count;
+    }
+
     public boolean existsByUsername(String username) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, username);

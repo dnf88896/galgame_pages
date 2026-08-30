@@ -24,7 +24,7 @@
           </el-form-item>
 
           <el-form-item label="分类">
-            <el-select v-model="form.categories" multiple collapse-tags filterable placeholder="选择分类" style="width:100%">
+            <el-select v-model="form.categories" multiple filterable placeholder="选择分类" style="width:100%">
               <el-option-group v-for="g in CATEGORY_GROUPS" :key="g.key" :label="g.name">
                 <el-option v-for="c in GALGAME_CATEGORIES.filter(x => x.group === g.key)" :key="c.key" :value="c.key" :label="c.label" />
               </el-option-group>
@@ -76,60 +76,16 @@
           </el-form-item>
 
           <el-form-item label="制作人员">
-            <div class="add-links">
-              <div v-for="(link, i) in form.staffLinks" :key="i" class="add-link-row">
-                <el-input
-                  v-model="link.description"
-                  placeholder="职责/备注（如 脚本、原画）"
-                  class="add-link-label"
-                  maxlength="200"
-                />
-                <el-select
-                  v-model="link.id"
-                  filterable
-                  clearable
-                  placeholder="选择制作人员"
-                  class="add-link-url"
-                >
-                  <el-option v-for="s in staffOptions" :key="s.id" :label="s.name" :value="s.id" />
-                </el-select>
-                <el-button
-                  link
-                  type="danger"
-                  :aria-label="`删除制作人员 ${i + 1}`"
-                  @click="form.staffLinks.splice(i, 1)"
-                >删除</el-button>
-              </div>
-              <el-button type="primary" plain size="small" class="add-link-btn" @click="form.staffLinks.push({ id: null, description: '' })">+ 添加制作人员</el-button>
+            <div class="gal-link-entry">
+              <el-button type="primary" plain @click="openEditor('staffs')">修改制作人员</el-button>
+              <span v-if="staffCount" class="gal-link-count">已选 {{ staffCount }} 名</span>
             </div>
           </el-form-item>
 
           <el-form-item label="角色">
-            <div class="add-links">
-              <div v-for="(link, i) in form.characterLinks" :key="i" class="add-link-row">
-                <el-input
-                  v-model="link.description"
-                  placeholder="定位/备注（如 女主、CV）"
-                  class="add-link-label"
-                  maxlength="200"
-                />
-                <el-select
-                  v-model="link.id"
-                  filterable
-                  clearable
-                  placeholder="选择角色"
-                  class="add-link-url"
-                >
-                  <el-option v-for="c in characterOptions" :key="c.id" :label="c.name" :value="c.id" />
-                </el-select>
-                <el-button
-                  link
-                  type="danger"
-                  :aria-label="`删除角色 ${i + 1}`"
-                  @click="form.characterLinks.splice(i, 1)"
-                >删除</el-button>
-              </div>
-              <el-button type="primary" plain size="small" class="add-link-btn" @click="form.characterLinks.push({ id: null, description: '' })">+ 添加角色</el-button>
+            <div class="gal-link-entry">
+              <el-button type="primary" plain @click="openEditor('characters')">修改角色</el-button>
+              <span v-if="charCount" class="gal-link-count">已选 {{ charCount }} 名</span>
             </div>
           </el-form-item>
 
@@ -185,6 +141,7 @@ import api from '../api'
 import { user } from '../store/user'
 import { refreshMoe } from '../utils/moeGain'
 import { getErrorMessage, resolveAssetUrl } from '../utils/format'
+import { saveDraft, loadDraft, clearDraft } from '../utils/galLinksDraft'
 import GalgameTagSelect from '../components/GalgameTagSelect.vue'
 import { GALGAME_CATEGORIES, CATEGORY_GROUPS } from '../constants/galgameCategory'
 
@@ -226,27 +183,20 @@ async function loadCompanyOptions() {
   }
 }
 
-// 制作人员下拉选项：GET /staffs 返回数组（仅 approved），失败兜底空数组不影响提交
-const staffOptions = ref([])
-async function loadStaffOptions() {
-  try {
-    const { data } = await api.get('/staffs')
-    staffOptions.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    // 拉取失败不阻断提交（制作人员可空）
-  }
+// 打开制作人员/角色编辑器：跳转前把当前表单（含未保存内容）暂存草稿，返回后恢复
+function openEditor(type) {
+  saveDraft({
+    form,
+    editMode: false,
+    imagePreview: imagePreview.value,
+    links: links.value,
+  })
+  router.push(type === 'staffs' ? '/galgame/edit-staffs' : '/galgame/edit-characters')
 }
 
-// 角色下拉选项：GET /characters 返回数组（仅 approved），失败兜底空数组不影响提交
-const characterOptions = ref([])
-async function loadCharacterOptions() {
-  try {
-    const { data } = await api.get('/characters')
-    characterOptions.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    // 拉取失败不阻断提交（角色可空）
-  }
-}
+// 已选制作人员/角色数量（按钮旁展示）
+const staffCount = computed(() => form.staffLinks.filter((l) => l.id != null).length)
+const charCount = computed(() => form.characterLinks.filter((l) => l.id != null).length)
 
 function goBack() {
   if (window.history.length > 1) router.back()
@@ -316,6 +266,7 @@ async function submit() {
     } else {
       ElMessage.success('已提交，等待管理员审核')
     }
+    clearDraft() // 提交完成，清掉编辑器草稿，避免下次进入误恢复
     router.push('/galgame')
   } catch (e) {
     ElMessage.error(getErrorMessage(e, '提交失败'))
@@ -326,8 +277,14 @@ async function submit() {
 
 onMounted(() => {
   loadCompanyOptions()
-  loadStaffOptions()
-  loadCharacterOptions()
+  // 从编辑器返回：恢复跳转前的草稿（名称/标签/简介/资源链接及改过的 staffs/characters）
+  const draft = loadDraft()
+  if (draft && draft.form) {
+    Object.assign(form, draft.form)
+    if (Array.isArray(draft.links)) links.value = draft.links
+    if (draft.imagePreview) imagePreview.value = draft.imagePreview
+    clearDraft()
+  }
 })
 </script>
 
@@ -419,5 +376,14 @@ onMounted(() => {
 }
 .add-link-btn {
   align-self: flex-start;
+}
+.gal-link-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.gal-link-count {
+  color: #909399;
+  font-size: 13px;
 }
 </style>

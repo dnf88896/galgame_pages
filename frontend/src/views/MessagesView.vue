@@ -99,7 +99,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import api from '../api'
 import { goBack } from '../utils/navigation'
 import { user, requireLogin } from '../store/user'
@@ -107,8 +107,10 @@ import { bumpUnreadRefresh } from '../store/unread'
 import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
 
 const router = useRouter()
+const route = useRoute()
 
-const activeTab = ref('dm')
+// 支持 /messages?tab=notifications（侧边栏「通知」入口）直达通知 tab；默认私信
+const activeTab = ref(route.query.tab === 'notifications' ? 'notifications' : 'dm')
 
 const conversations = ref([])
 const loading = ref(false)
@@ -186,6 +188,9 @@ async function loadNotifications() {
 
 // 切到「通知」tab：拉取列表 → 全部标已读 → 通知 tab 角标清零 → 触发顶栏红点刷新
 async function onTabChange(name) {
+  if (name === 'dm' || name === 'notifications') {
+    router.replace({ query: { tab: name } })
+  }
   if (name !== 'notifications') return
   await loadNotifications()
   try {
@@ -258,6 +263,8 @@ onMounted(() => {
   if (!requireLogin(router)) return
   load()
   loadNotifUnread()
+  // 从侧边栏「通知」进入（/messages?tab=notifications）：初始即加载通知列表并标已读
+  if (activeTab.value === 'notifications') onTabChange('notifications')
 })
 </script>
 

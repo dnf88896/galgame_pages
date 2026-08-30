@@ -202,7 +202,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { user } from '../store/user'
@@ -211,6 +211,7 @@ import EmojiPicker from '../components/EmojiPicker.vue'
 import { categories, categoryDescriptions, fetchTagStructure, sectionLabel, formatTime, isToday, getErrorMessage, resolveAssetUrl, isPinned } from '../utils/format'
 
 const router = useRouter()
+const route = useRoute()
 
 const posts = ref([])
 const loading = ref(false)
@@ -224,8 +225,6 @@ const leftNavGroups = [
     children: [
       { label: '发布帖子', to: '/compose' },
       { label: '发布公告', action: 'announcement' },
-      { label: '左侧边栏按钮1-3' },
-      { label: '左侧边栏按钮1-4' },
     ],
   },
   { label: '话题', children: [
@@ -243,21 +242,14 @@ const leftNavGroups = [
   ] },
   { label: '社交', children: [
     { label: '搜索用户', to: '/search-user' },
-    { label: '左侧边栏按钮4-2' },
-    { label: '左侧边栏按钮4-3' },
-    { label: '左侧边栏按钮4-4' },
+    { label: '关注', follow: true },
+    { label: '私信', to: '/messages' },
+    { label: '通知', to: '/messages?tab=notifications' },
   ] },
-  { label: '左侧边栏按钮5', children: [
-    { label: '左侧边栏按钮5-1' },
-    { label: '左侧边栏按钮5-2' },
-    { label: '左侧边栏按钮5-3' },
-    { label: '左侧边栏按钮5-4' },
-  ] },
-  { label: '左侧边栏按钮6', children: [
-    { label: '左侧边栏按钮6-1' },
-    { label: '左侧边栏按钮6-2' },
-    { label: '左侧边栏按钮6-3' },
-    { label: '左侧边栏按钮6-4' },
+  { label: '其他', children: [
+    { label: '话题排行', to: '/?sort=views' },
+    { label: 'Galgame排行', to: '/galgame?sort=rating' },
+    { label: '用户排行', to: '/user-ranking' },
   ] },
 ]
 // 标签结构（来自 /api/tags）：用于帖子卡片把 category/tags key 转成中文 label
@@ -286,9 +278,12 @@ const sortOptions = [
   { value: 'time', label: '时间顺序' },
   { value: 'hot', label: '热度' },
   { value: 'likes', label: '点赞量' },
+  { value: 'views', label: '浏览数' },
   { value: 'following', label: '关注的人' },
 ]
-const sortBy = ref('time')
+// 支持 /?sort=views 等 URL 直达（侧边栏「话题排行」）；非法值回退时间倒序
+const HOME_SORTS = ['time', 'hot', 'likes', 'views', 'following']
+const sortBy = ref(HOME_SORTS.includes(route.query.sort) ? route.query.sort : 'time')
 const loggedIn = computed(() => !!user.value)
 
 function onSortCommand(val) {
@@ -420,13 +415,24 @@ function onLeftNavChildClick(child) {
     goAllTopics()
     return
   }
+  if (child.follow) {
+    if (!user.value?.id) {
+      ElMessage.warning('请先登录。')
+      return
+    }
+    router.push(`/user/${user.value.id}/following`)
+    return
+  }
   if (child.to) {
     router.push(child.to)
     return
   }
   if (child.action === 'announcement') {
     openAnnouncementDialog()
+    return
   }
+  // 纯占位入口（如「用户排行」）：功能未实现时提示
+  ElMessage.info('功能开发中，敬请期待')
 }
 
 // 发布公告弹窗：仅 1 级管理员可发，普通用户提示去认证

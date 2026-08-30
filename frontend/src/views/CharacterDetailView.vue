@@ -126,7 +126,7 @@
                     <p v-if="w.description" class="gal-desc">{{ w.description }}</p>
                     <div class="gal-views">
                       <span>浏览 {{ w.view_count || 0 }}</span>
-                      <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(1) }} / 10</span>
+                      <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(2) }} / 10</span>
                       <span v-else>暂无评分</span>
                     </div>
                   </div>

@@ -226,13 +226,13 @@ public class GalgameDao {
 
     /** 兼容旧调用：不按分类/制作人员/角色筛选（委托给带 categories/staffId/characterId 的版本） */
     public List<Galgame> findAll(String q, List<Long> tags, String sort, String field, Long companyId) {
-        return findAll(q, tags, sort, field, companyId, null, null);
+        return findAll(q, tags, null, sort, field, companyId, null, null, null, null);
     }
 
     /** 兼容旧调用：不按分类筛选（委托给带 categories 的版本） */
     public List<Galgame> findAll(String q, List<Long> tags, String sort, String field, Long companyId,
                                  Long staffId, Long characterId) {
-        return findAll(q, tags, null, sort, field, companyId, staffId, characterId);
+        return findAll(q, tags, null, sort, field, companyId, staffId, characterId, null, null);
     }
 
     /**
@@ -252,7 +252,7 @@ public class GalgameDao {
      * （无发售日期 / 未评分的排最后）。
      */
     public List<Galgame> findAll(String q, List<Long> tags, List<String> categories, String sort, String field, Long companyId,
-                                 Long staffId, Long characterId) {
+                                 Long staffId, Long characterId, Long limit, Long offset) {
         StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM galgames g WHERE 1=1 AND g.status = 'approved'");
         List<Object> args = new ArrayList<>();
         if (q != null && !q.isBlank()) {
@@ -291,6 +291,15 @@ public class GalgameDao {
             args.add(characterId);
         }
         sql.append(orderBy(sort));
+        // 分页（可选）：limit>0 才启用，offset 默认 0。其它调用方不传 → 返回全部（与旧行为一致）
+        if (limit != null && limit > 0) {
+            sql.append(" LIMIT ?");
+            args.add(limit);
+            if (offset != null && offset > 0) {
+                sql.append(" OFFSET ?");
+                args.add(offset);
+            }
+        }
         return jdbcTemplate.query(sql.toString(), GALGAME_ROW_MAPPER, args.toArray());
     }
 
@@ -449,19 +458,19 @@ public class GalgameDao {
         return count != null && count > 0;
     }
 
-    /** 某 galgame 关联的制作人员列表（仅已上架制作人员，按名称排序），详情页展示；description 为制作人员在作品中的职责/备注 */
+    /** 某 galgame 关联的制作人员列表（仅已上架制作人员，按关联添加时间排序，后加入的排后面），详情页展示；description 为制作人员在作品中的职责/备注 */
     public List<StaffBrief> findStaffBriefs(long galgameId) {
         return jdbcTemplate.query(
                 "SELECT s.id, s.name, gs.description FROM galgame_staff gs JOIN staffs s ON s.id = gs.staff_id "
-                        + "WHERE gs.galgame_id = ? AND s.status = 'approved' ORDER BY s.name, s.id",
+                        + "WHERE gs.galgame_id = ? AND s.status = 'approved' ORDER BY gs.created_at, gs.staff_id",
                 (rs, rowNum) -> new StaffBrief(rs.getLong("id"), rs.getString("name"), rs.getString("description")), galgameId);
     }
 
-    /** 某 galgame 关联的角色列表（仅已上架角色，按名称排序），详情页展示；image 为角色封面图 URL；description 为角色在作品中的定位/备注 */
+    /** 某 galgame 关联的角色列表（仅已上架角色，按关联添加时间排序，后加入的排后面），详情页展示；image 为角色封面图 URL；description 为角色在作品中的定位/备注 */
     public List<CharacterBrief> findCharacterBriefs(long galgameId) {
         return jdbcTemplate.query(
                 "SELECT c.id, c.name, c.image, gc.description FROM galgame_character gc JOIN characters c ON c.id = gc.character_id "
-                        + "WHERE gc.galgame_id = ? AND c.status = 'approved' ORDER BY c.name, c.id",
+                        + "WHERE gc.galgame_id = ? AND c.status = 'approved' ORDER BY gc.created_at, gc.character_id",
                 (rs, rowNum) -> new CharacterBrief(rs.getLong("id"), rs.getString("name"), rs.getString("image"), rs.getString("description")), galgameId);
     }
 

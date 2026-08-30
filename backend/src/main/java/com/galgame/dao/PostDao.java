@@ -147,6 +147,9 @@ public class PostDao {
                     + "(posts.view_count + posts.reply_count * 3 + posts.like_count * 5) DESC, "
                     + "posts.created_at DESC, posts.id DESC";
         }
+        if ("views".equals(sort)) {
+            return " ORDER BY " + pinnedPrefix + "posts.view_count DESC, posts.created_at DESC, posts.id DESC";
+        }
         return " ORDER BY " + pinnedPrefix + "posts.created_at DESC, posts.id DESC";
     }
 

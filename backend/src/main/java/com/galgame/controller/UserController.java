@@ -1,6 +1,5 @@
 package com.galgame.controller;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -15,111 +14,80 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.galgame.auth.AuthContext;
 import com.galgame.auth.TokenService;
-import com.galgame.dao.BlockDao;
-import com.galgame.dao.FollowDao;
-import com.galgame.dao.PostDao;
-import com.galgame.dao.ReplyDao;
-import com.galgame.dao.UserDao;
-import com.galgame.model.RecentPost;
-import com.galgame.model.User;
-import com.galgame.model.UserProfile;
+import com.galgame.exception.BusinessException;
+import com.galgame.service.UserService;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * 用户公开资料接口（无需登录，可选登录判断 is_following）。
+ * <p>业务逻辑全部委托 {@link UserService}，本层只负责参数解析、登录态解析与业务异常转响应。
  */
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
-    private final UserDao userDao;
-    private final PostDao postDao;
-    private final ReplyDao replyDao;
-    private final FollowDao followDao;
-    private final BlockDao blockDao;
+    private final UserService userService;
     private final TokenService tokenService;
 
-    public UserController(UserDao userDao, PostDao postDao, ReplyDao replyDao,
-                          FollowDao followDao, BlockDao blockDao, TokenService tokenService) {
-        this.userDao = userDao;
-        this.postDao = postDao;
-        this.replyDao = replyDao;
-        this.followDao = followDao;
-        this.blockDao = blockDao;
+    public UserController(UserService userService, TokenService tokenService) {
+        this.userService = userService;
         this.tokenService = tokenService;
     }
 
     /** 按用户名模糊搜索用户（公开，无需登录）；返回用户列表（最多 50 条，新注册优先），q 为空返回空列表 */
     @GetMapping("/search")
     public ResponseEntity<Object> searchUsers(@RequestParam(value = "q", required = false) String q) {
-        String kw = q == null ? "" : q.trim();
-        if (kw.isEmpty()) {
-            return ResponseEntity.ok(List.of());
+        try {
+            return ResponseEntity.ok(userService.searchUsers(q));
+        } catch (BusinessException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
         }
-        return ResponseEntity.ok(userDao.findByNameLike(kw));
+    }
+
+    /** 用户排行：按萌点从高到低分页返回（公开，无需登录）；page/page_size 越界自动回退（默认 1/20，page_size≤100） */
+    @GetMapping("/ranking")
+    public ResponseEntity<Object> userRanking(
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "page_size", defaultValue = "20") int pageSize) {
+        try {
+            return ResponseEntity.ok(userService.ranking(page, pageSize));
+        } catch (BusinessException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
+        }
     }
 
     /** 3. 公开资料：基础信息 + 发帖/回复/收到赞统计 + 最新 5 帖 + 关注/粉丝数 + is_following + is_blocked */
     @GetMapping("/{id}")
     public ResponseEntity<Object> getUser(@PathVariable Long id, HttpServletRequest request) {
-        Optional<User> opt = userDao.findById(id);
-        if (opt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "用户不存在。"));
+        try {
+            Optional<Long> currentUserId = tokenService.resolveUserId(request.getHeader("Authorization"));
+            return ResponseEntity.ok(userService.getProfile(id, currentUserId.orElse(null)));
+        } catch (BusinessException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
         }
-        User user = opt.get();
-        int postCount = postDao.countByUserId(id);
-        int replyCount = replyDao.countByUserId(id);
-        int receivedLikes = postDao.countLikesReceived(id) + replyDao.countLikesReceived(id);
-
-        // 未登录视为未关注 / 未屏蔽
-        Optional<Long> currentUserId = tokenService.resolveUserId(request.getHeader("Authorization"));
-        boolean isFollowing = currentUserId.isPresent() && followDao.isFollowing(currentUserId.get(), id);
-        boolean isBlocked = currentUserId.isPresent() && blockDao.isBlocked(currentUserId.get(), id);
-
-        // 双方任一方向存在屏蔽关系时，隐藏该用户「最近发布」列表
-        boolean hidden = currentUserId.isPresent()
-                && (blockDao.isBlocked(currentUserId.get(), id) || blockDao.isBlocked(id, currentUserId.get()));
-        List<RecentPost> recentPosts = hidden ? List.of() : postDao.findRecentPostsByUser(id, 5);
-
-        UserProfile profile = new UserProfile(
-                user.id(), user.username(), user.nickname(), user.avatarUrl(), user.bio(), user.createdAt(),
-                user.adminLevel(), postCount, replyCount, receivedLikes, recentPosts,
-                followDao.countFollowers(id), followDao.countFollowing(id), isFollowing, isBlocked,
-                postDao.countFavorites(id), user.hideFavorites(), user.moePoints(), user.banUntil());
-        return ResponseEntity.ok(profile);
     }
 
     /** 收藏列表（公开；若用户隐藏收藏则仅本人可见，未登录/非本人访问返回 403） */
     @GetMapping("/{id}/favorites")
     public ResponseEntity<Object> getFavorites(@PathVariable Long id, HttpServletRequest request) {
-        Optional<User> opt = userDao.findById(id);
-        if (opt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "用户不存在。"));
-        }
-        User user = opt.get();
-        if (user.hideFavorites() != null && user.hideFavorites() == 1) {
+        try {
             Optional<Long> currentUserId = tokenService.resolveUserId(request.getHeader("Authorization"));
-            boolean isSelf = currentUserId.isPresent() && currentUserId.get().equals(id);
-            if (!isSelf) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "该用户已隐藏收藏。"));
-            }
+            return ResponseEntity.ok(userService.getFavorites(id, currentUserId.orElse(null)));
+        } catch (BusinessException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
         }
-        return ResponseEntity.ok(postDao.findFavoritesByUser(id));
     }
 
     /** 解封用户（需登录 + 管理员）：清除 ban_until */
     @PostMapping("/{id}/unban")
     public ResponseEntity<Object> unban(@PathVariable Long id, HttpServletRequest request) {
-        long currentUserId = AuthContext.currentUserId(request);
-        User current = userDao.findById(currentUserId).orElseThrow(() -> new IllegalStateException("登录用户不存在"));
-        if (current.adminLevel() == null || current.adminLevel() < 1) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "需要管理员权限。"));
+        try {
+            long currentUserId = AuthContext.currentUserId(request);
+            userService.unban(id, currentUserId);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (BusinessException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
         }
-        if (userDao.findById(id).isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "用户不存在。"));
-        }
-        userDao.updateBanUntil(id, null);
-        return ResponseEntity.ok(Map.of("ok", true));
     }
 }

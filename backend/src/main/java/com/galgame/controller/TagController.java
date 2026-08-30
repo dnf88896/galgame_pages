@@ -78,10 +78,11 @@ public class TagController {
         return ResponseEntity.ok(tagDao.findAll(trimToNull(q), trimToNull(category), sort));
     }
 
-    /** 1.5 远程搜索（公开，仅 approved）：供编辑选择器下拉，返回 [{id,name,category,spoiler_level}]（不含 count） */
+    /** 1.5 远程搜索（公开，仅 approved）：供编辑选择器下拉，返回 [{id,name,category,spoiler_level}]（不含 count）。
+     * limit 拉大以支持「浏览全部标签」：q 为空时返回全部 approved 标签（全量导入后已 2400+，用 5000 覆盖）；q 有值时模糊过滤后远小于此。 */
     @GetMapping("/search")
     public ResponseEntity<Object> search(@RequestParam(value = "q", required = false) String q) {
-        return ResponseEntity.ok(tagDao.search(trimToNull(q), 20));
+        return ResponseEntity.ok(tagDao.search(trimToNull(q), 5000));
     }
 
     /** 2. 待审核列表（管理员）：返回 status='pending' 的标签（含提交人昵称 creator）。精确路径 /pending 优先于 /{id} 模板。 */
@@ -106,10 +107,12 @@ public class TagController {
 
     /**
      * 3. 标签详情：approved 公开；pending/rejected 仅创建者或管理员可见，其它人一律 404。
-     * 返回 Map：标签基础字段（含 galgame_count / creator）+ works（该标签下已上架作品列表）。
+     * 返回 Map：标签基础字段（含 galgame_count / creator）+ works（该标签下已上架作品列表，支持 limit/offset 分页）+ works_total（总作品数）。
      */
     @GetMapping("/{id}")
-    public ResponseEntity<Object> getById(@PathVariable Long id, HttpServletRequest request) {
+    public ResponseEntity<Object> getById(@PathVariable Long id, HttpServletRequest request,
+                                          @RequestParam(value = "limit", required = false) Long limit,
+                                          @RequestParam(value = "offset", required = false) Long offset) {
         Optional<Tag> opt = tagDao.findById(id);
         if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "标签不存在。"));
@@ -123,7 +126,7 @@ public class TagController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "标签不存在。"));
             }
         }
-        return ResponseEntity.ok(withWorks(tag));
+        return ResponseEntity.ok(withWorks(tag, limit, offset));
     }
 
     /**
@@ -267,10 +270,11 @@ public class TagController {
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
-    /** 详情 Map 组装：基础字段（SNAKE_CASE 序列化）+ works（该标签下已上架作品列表） */
-    private Map<String, Object> withWorks(Tag tag) {
+    /** 详情 Map 组装：基础字段（SNAKE_CASE 序列化）+ works（该标签下已上架作品列表，limit/offset 分页，不传返回全部）+ works_total */
+    private Map<String, Object> withWorks(Tag tag, Long limit, Long offset) {
         Map<String, Object> map = objectMapper.convertValue(tag, new TypeReference<Map<String, Object>>() {});
-        map.put("works", galgameDao.findAll(null, List.of(tag.id()), "created", "name", null));
+        map.put("works", galgameDao.findAll(null, List.of(tag.id()), null, "created", "name", null, null, null, limit, offset));
+        map.put("works_total", tag.galgameCount());
         return map;
     }
 

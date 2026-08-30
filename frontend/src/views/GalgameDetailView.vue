@@ -81,7 +81,7 @@
               <div class="gal-detail-meta">
                 <span v-if="detail.creator">提交人：{{ detail.creator }}</span>
                 <span v-if="detail.release_date">发售：{{ detail.release_date }}</span>
-                <span>评分：{{ detail.rating_avg != null ? `${Number(detail.rating_avg).toFixed(1)} / 10` : '暂无' }}<template v-if="detail.rating_count > 0">（{{ detail.rating_count }} 人评分）</template></span>
+                <span>评分：{{ detail.rating_avg != null ? `${Number(detail.rating_avg).toFixed(2)} / 10` : '暂无' }}<template v-if="detail.rating_count > 0">（{{ detail.rating_count }} 人评分）</template></span>
                 <span v-if="detail.created_at">创建：{{ formatTime(detail.created_at) }}</span>
                 <span v-if="detail.updated_at">更新：{{ formatTime(detail.updated_at) }}</span>
               </div>
@@ -167,12 +167,19 @@
             >{{ t.label }}</button>
           </div>
 
-          <!-- 制作人员 -->
+          <!-- 制作人员：同职业合并为一行「职业 人员1 人员2」，超长自动换行 -->
           <div v-if="sectionTab === 'staffs'" class="gal-section-pane">
             <div v-if="detail.staffs && detail.staffs.length" class="gal-relation-list">
-              <div v-for="s in detail.staffs" :key="s.id" class="gal-relation-item">
-                <span v-if="s.description" class="gal-relation-desc">{{ s.description }}</span>
-                <a class="gal-staff-link" @click="goStaff(s.id)">{{ s.name }}</a>
+              <div v-for="g in staffGroups" :key="g.description || '__none__'" class="gal-relation-item">
+                <span v-if="g.description" class="gal-relation-desc">{{ g.description }}</span>
+                <span class="gal-staff-group-members">
+                  <a
+                    v-for="s in g.members"
+                    :key="s.id"
+                    class="gal-staff-link"
+                    @click="goStaff(s.id)"
+                  >{{ s.name }}</a>
+                </span>
               </div>
             </div>
             <p v-else class="gal-section-empty">暂无制作人员</p>
@@ -180,7 +187,7 @@
 
           <!-- 角色 -->
           <div v-if="sectionTab === 'characters'" class="gal-section-pane">
-            <div v-if="detail.characters && detail.characters.length" class="gal-relation-list">
+            <div v-if="detail.characters && detail.characters.length" class="gal-char-grid">
               <div v-for="c in detail.characters" :key="c.id" class="gal-relation-item gal-char-card">
                 <div class="gal-char-cover">
                   <img
@@ -442,7 +449,7 @@
             </el-form-item>
 
             <el-form-item label="分类">
-              <el-select v-model="form.categories" multiple collapse-tags filterable placeholder="选择分类" style="width:100%">
+              <el-select v-model="form.categories" multiple filterable placeholder="选择分类" style="width:100%">
                 <el-option-group v-for="g in CATEGORY_GROUPS" :key="g.key" :label="g.name">
                   <el-option v-for="c in GALGAME_CATEGORIES.filter(x => x.group === g.key)" :key="c.key" :value="c.key" :label="c.label" />
                 </el-option-group>
@@ -494,60 +501,16 @@
             </el-form-item>
 
             <el-form-item label="制作人员">
-              <div class="add-links">
-                <div v-for="(link, i) in form.staffLinks" :key="i" class="add-link-row">
-                  <el-input
-                    v-model="link.description"
-                    placeholder="职责/备注（如 脚本、原画）"
-                    class="add-link-label"
-                    maxlength="200"
-                  />
-                  <el-select
-                    v-model="link.id"
-                    filterable
-                    clearable
-                    placeholder="选择制作人员"
-                    class="add-link-url"
-                  >
-                    <el-option v-for="s in staffOptions" :key="s.id" :label="s.name" :value="s.id" />
-                  </el-select>
-                  <el-button
-                    link
-                    type="danger"
-                    :aria-label="`删除制作人员 ${i + 1}`"
-                    @click="form.staffLinks.splice(i, 1)"
-                  >删除</el-button>
-                </div>
-                <el-button type="primary" plain size="small" class="add-link-btn" @click="form.staffLinks.push({ id: null, description: '' })">+ 添加制作人员</el-button>
+              <div class="gal-link-entry">
+                <el-button type="primary" plain @click="openEditor('staffs')">修改制作人员</el-button>
+                <span v-if="staffCount" class="gal-link-count">已选 {{ staffCount }} 名</span>
               </div>
             </el-form-item>
 
             <el-form-item label="角色">
-              <div class="add-links">
-                <div v-for="(link, i) in form.characterLinks" :key="i" class="add-link-row">
-                  <el-input
-                    v-model="link.description"
-                    placeholder="定位/备注（如 女主、CV）"
-                    class="add-link-label"
-                    maxlength="200"
-                  />
-                  <el-select
-                    v-model="link.id"
-                    filterable
-                    clearable
-                    placeholder="选择角色"
-                    class="add-link-url"
-                  >
-                    <el-option v-for="c in characterOptions" :key="c.id" :label="c.name" :value="c.id" />
-                  </el-select>
-                  <el-button
-                    link
-                    type="danger"
-                    :aria-label="`删除角色 ${i + 1}`"
-                    @click="form.characterLinks.splice(i, 1)"
-                  >删除</el-button>
-                </div>
-                <el-button type="primary" plain size="small" class="add-link-btn" @click="form.characterLinks.push({ id: null, description: '' })">+ 添加角色</el-button>
+              <div class="gal-link-entry">
+                <el-button type="primary" plain @click="openEditor('characters')">修改角色</el-button>
+                <span v-if="charCount" class="gal-link-count">已选 {{ charCount }} 名</span>
               </div>
             </el-form-item>
 
@@ -601,11 +564,58 @@
               </el-select>
             </el-form-item>
 
+            <el-form-item v-if="canEditContent" label="画廊">
+              <div class="gal-link-entry">
+                <el-button type="primary" plain @click="galleryEditorVisible = true">编辑画廊</el-button>
+                <span v-if="galleryCount" class="gal-link-count">共 {{ galleryCount }} 张</span>
+              </div>
+            </el-form-item>
+
             <el-form-item>
               <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
               <el-button @click="cancelEdit">取消</el-button>
             </el-form-item>
           </el-form>
+
+          <!-- 画廊编辑弹窗：查看 / 上传 / 删除画廊图片（写操作即时生效，关闭不丢主表单） -->
+          <el-dialog v-model="galleryEditorVisible" title="编辑画廊" width="660px" :close-on-click-modal="false">
+            <div v-if="(detail.gallery || []).length" class="gal-gallery-grid">
+              <div v-for="img in detail.gallery" :key="img.id" class="gal-gallery-item">
+                <img
+                  :src="resolveAssetUrl(img.url)"
+                  :alt="`画廊图片 ${img.id}`"
+                  @click="openGalleryImage(img.url)"
+                />
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  class="gal-gallery-del"
+                  @click="deleteGalleryImage(img.id)"
+                >删除</el-button>
+              </div>
+            </div>
+            <p v-else class="gal-section-empty">暂无画廊图片，点击下方按钮上传</p>
+            <div class="gal-gallery-upload">
+              <el-button
+                type="primary"
+                plain
+                :loading="galleryUploading"
+                @click="galleryEditFileInput?.click()"
+              >上传图片</el-button>
+              <input
+                ref="galleryEditFileInput"
+                type="file"
+                accept="image/*"
+                multiple
+                style="display:none"
+                @change="onGalleryFilesChange"
+              />
+            </div>
+            <template #footer>
+              <el-button type="primary" @click="galleryEditorVisible = false">完成</el-button>
+            </template>
+          </el-dialog>
         </div>
       </template>
     </div>
@@ -620,6 +630,7 @@ import api from '../api'
 import { token, user, requireLogin } from '../store/user'
 import { refreshMoe } from '../utils/moeGain'
 import { getErrorMessage, resolveAssetUrl, formatTime } from '../utils/format'
+import { saveDraft, loadDraft, clearDraft } from '../utils/galLinksDraft'
 import MentionTextarea from '../components/MentionTextarea.vue'
 import EmojiPicker from '../components/EmojiPicker.vue'
 import GalgameTagSelect from '../components/GalgameTagSelect.vue'
@@ -686,6 +697,22 @@ const viewType = ref('short')
 const shortReplies = computed(() => (detail.value?.replies || []).filter((r) => !r.is_long))
 const longReplies = computed(() => (detail.value?.replies || []).filter((r) => r.is_long))
 const filteredReplies = computed(() => (viewType.value === 'long' ? longReplies.value : shortReplies.value))
+// 制作人员按「职业」分组：同职业合并为一行「职业 人员1 人员2」，超长自动换行（保持首次出现顺序）
+const staffGroups = computed(() => {
+  const groups = []
+  const idx = new Map()
+  for (const s of detail.value?.staffs || []) {
+    const key = s.description || ''
+    let gi = idx.get(key)
+    if (gi === undefined) {
+      gi = groups.length
+      idx.set(key, gi)
+      groups.push({ description: key, members: [] })
+    }
+    groups[gi].members.push(s)
+  }
+  return groups
+})
 
 // 评论图片上传：隐藏 file input + 是否上传中
 const replyImageInput = ref(null)
@@ -722,6 +749,11 @@ function openImage(u) {
 // 隐藏 file input + 是否上传中（模式同评论图片上传）
 const galleryFileInput = ref(null)
 const galleryUploading = ref(false)
+
+// 编辑模式「编辑画廊」弹窗：独立 file input（与详情页 tab 的 galleryFileInput 分离，避免同名 ref 互覆盖），change 共用 onGalleryFilesChange
+const galleryEditorVisible = ref(false)
+const galleryEditFileInput = ref(null)
+const galleryCount = computed(() => (detail.value?.gallery || []).length)
 
 // 逐张上传所选图片 → POST /galgames/{id}/images（multipart 字段名 files），全部成功后刷新详情
 async function onGalleryFilesChange(e) {
@@ -835,27 +867,21 @@ async function loadCompanyOptions() {
   }
 }
 
-// 制作人员下拉选项：GET /staffs 返回数组（仅 approved），失败兜底空数组不影响编辑
-const staffOptions = ref([])
-async function loadStaffOptions() {
-  try {
-    const { data } = await api.get('/staffs')
-    staffOptions.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    // 拉取失败不阻断编辑（制作人员可空）
-  }
+// 打开制作人员/角色编辑器：跳转前把当前表单（含未保存内容）暂存草稿，返回后恢复
+function openEditor(type) {
+  saveDraft({
+    form,
+    editMode: true,
+    imagePreview: imagePreview.value,
+    links: links.value,
+    relatedOptions: relatedOptions.value,
+  })
+  router.push(type === 'staffs' ? '/galgame/edit-staffs' : '/galgame/edit-characters')
 }
 
-// 角色下拉选项：GET /characters 返回数组（仅 approved），失败兜底空数组不影响编辑
-const characterOptions = ref([])
-async function loadCharacterOptions() {
-  try {
-    const { data } = await api.get('/characters')
-    characterOptions.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    // 拉取失败不阻断编辑（角色可空）
-  }
-}
+// 已选制作人员/角色数量（按钮旁展示）
+const staffCount = computed(() => form.staffLinks.filter((l) => l.id != null).length)
+const charCount = computed(() => form.characterLinks.filter((l) => l.id != null).length)
 
 // ---- 标签系统（tags 现在是对象数组 [{id,name,category,spoiler_level,galgame_count}]）----
 // 资源 chips：type / language / platform（详情信息卡 meta 区，彩色小 chip）
@@ -1281,11 +1307,19 @@ async function submitReport() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadCompanyOptions()
-  loadStaffOptions()
-  loadCharacterOptions()
-  loadDetail()
+  await loadDetail()
+  // 从编辑器返回：恢复跳转前草稿（含未保存的编辑表单 + 编辑模式）
+  const draft = loadDraft()
+  if (draft && draft.form) {
+    Object.assign(form, draft.form)
+    if (Array.isArray(draft.links)) links.value = draft.links
+    if (draft.imagePreview) imagePreview.value = draft.imagePreview
+    if (Array.isArray(draft.relatedOptions)) relatedOptions.value = draft.relatedOptions
+    editMode.value = !!draft.editMode
+    clearDraft()
+  }
 })
 </script>
 
@@ -1723,27 +1757,60 @@ onMounted(() => {
   flex-shrink: 0;
   max-width: 40%;
 }
+/* 同职业一组：人员横向排开，超长自动折行到下一行 */
+.gal-staff-group-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.gal-link-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.gal-link-count {
+  color: #909399;
+  font-size: 13px;
+}
 .gal-section-empty {
   color: #909399;
   text-align: center;
   padding: 24px 0;
   margin: 0;
 }
-/* 角色栏卡片：左侧封面小图 + 右侧名称/定位 */
+/* 角色 tab：方框网格，一行 5 个（窄屏降 3 / 2 列） */
+.gal-char-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .gal-char-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 600px) {
+  .gal-char-grid { grid-template-columns: repeat(2, 1fr); }
+}
+/* 角色栏卡片：纵向方框卡片（封面在上，名称/定位在下） */
 .gal-char-card {
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  text-align: center;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
 }
 .gal-char-cover {
-  flex-shrink: 0;
-  height: 84px;
+  width: 100%;
   border-radius: 6px;
   overflow: hidden;
   background: #f0f2f5;
 }
 .gal-char-cover img {
-  height: 100%;
-  width: auto;
+  width: 100%;
+  height: auto;
   display: block;
 }
 .gal-char-cover-placeholder {
@@ -1760,6 +1827,7 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 4px;
 }
 /* ---- 评论区（同 PostView 评论区样式，去掉置顶）---- */

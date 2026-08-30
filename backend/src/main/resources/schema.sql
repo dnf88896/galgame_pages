@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- 后续需要追加信息（评分/发售日期/厂商官网等）时直接加列即可；links 存 JSON 数组文本（[{label,url}]）。
 CREATE TABLE IF NOT EXISTS galgames (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
+    kungal_id   BIGINT       NULL COMMENT 'KUNGal 作品 gid（批量导入唯一键，防重复）',
     name        VARCHAR(200) NOT NULL COMMENT 'Galgame 名称',
     description TEXT         NULL COMMENT '简介',
     image       VARCHAR(500) NULL COMMENT '封面图 URL（本地上传 /uploads/galgame_images/ 或外部链接）',
@@ -231,6 +232,7 @@ CREATE TABLE IF NOT EXISTS galgames (
     apply_type  VARCHAR(10)  NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）',
     original_id BIGINT       NULL COMMENT '修改申请影子行的原记录 id（apply_type=update 时有值）',
     PRIMARY KEY (id),
+    UNIQUE KEY uk_galgames_kungal_id (kungal_id),
     KEY idx_galgames_name (name),
     KEY idx_galgames_original_id (original_id),
     CONSTRAINT fk_galgames_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
@@ -564,6 +566,25 @@ CREATE TABLE IF NOT EXISTS galgame_related (
     KEY idx_gr_related (related_id),
     CONSTRAINT fk_gr_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
     CONSTRAINT fk_gr_related FOREIGN KEY (related_id) REFERENCES galgames (id) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 系列：批量导入时持久化 KUNGal 的 series（id 取 KUNGal series id），供跨批关联用。
+-- 每次导入后按系列全库重算 galgame_related，新批次作品会自动和库内已有同系列作品互相关联。
+CREATE TABLE IF NOT EXISTS series (
+    id         BIGINT       NOT NULL PRIMARY KEY COMMENT 'KUNGal series id',
+    name       VARCHAR(200) NOT NULL,
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- Galgame 所属系列（多对多：一作可属多系列）：脚本写入，全库关联重算的数据源。
+-- 注意约束名前缀 fk_gser_*（fk_gs_* 已被 galgame_staff 占用，MySQL 8.0 库内约束名唯一）。
+CREATE TABLE IF NOT EXISTS galgame_series (
+    galgame_id BIGINT   NOT NULL,
+    series_id  BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (galgame_id, series_id),
+    CONSTRAINT fk_gser_galgame FOREIGN KEY (galgame_id) REFERENCES galgames (id) ON DELETE CASCADE,
+    CONSTRAINT fk_gser_series  FOREIGN KEY (series_id) REFERENCES series (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 条目贡献者：记录谁贡献了 galgame / company / staff / character 条目

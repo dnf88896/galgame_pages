@@ -410,6 +410,10 @@ public class DatabaseMigrator implements ApplicationRunner {
         ensureColumn("galgames", "moe_awarded", "TINYINT(1) NOT NULL DEFAULT 0");
         // 关联会社：galgames 加 company_id 列（指向 companies 表，无外键约束，仅跳转用）
         ensureColumn("galgames", "company_id", "BIGINT NULL");
+        // KUNGal 批量导入唯一键：galgames 加 kungal_id 列 + 唯一索引（import_kungal.py 按 gid 防重复，
+        // 老数据无 gid 会在下次导入时按 name 兜底回填）
+        ensureColumn("galgames", "kungal_id", "BIGINT NULL COMMENT 'KUNGal 作品 gid（批量导入唯一键，防重复）'");
+        ensureUniqueIndex("galgames", "uk_galgames_kungal_id", "kungal_id");
         // 「修改申请」影子行：四实体表补 apply_type（create/update）与 original_id（修改申请指向原记录）
         // 用户在已上架（approved）记录上提交修改时，复制原记录为新行（apply_type='update'、original_id=原id、status='pending'）
         ensureColumn("galgames", "apply_type", "VARCHAR(10) NOT NULL DEFAULT 'create' COMMENT '申请类型：create创建申请 / update修改申请（影子行）'");
@@ -671,6 +675,16 @@ public class DatabaseMigrator implements ApplicationRunner {
                 Integer.class, table, indexName);
         if (exists == null || exists == 0) {
             jdbcTemplate.execute("ALTER TABLE " + table + " ADD INDEX " + indexName + " (" + columns + ")");
+        }
+    }
+
+    private void ensureUniqueIndex(String table, String indexName, String columns) {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                        + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+                Integer.class, table, indexName);
+        if (exists == null || exists == 0) {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD UNIQUE INDEX " + indexName + " (" + columns + ")");
         }
     }
 

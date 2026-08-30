@@ -94,7 +94,8 @@
 
       <!-- 列表 / 空状态 -->
       <template v-else>
-        <div v-if="galgames.length" class="gal-list">
+        <template v-if="galgames.length">
+        <div class="gal-list">
           <article v-for="p in galgames" :key="p.id" class="gal-card" @click="goDetail(p.id)">
             <div class="gal-cover">
               <img
@@ -129,12 +130,17 @@
               </div>
               <div class="gal-views">
                 <span>浏览 {{ p.view_count || 0 }}</span>
-                <span v-if="p.rating_avg != null">评分 {{ Number(p.rating_avg).toFixed(1) }} / 10</span>
+                <span v-if="p.rating_avg != null">评分 {{ Number(p.rating_avg).toFixed(2) }} / 10</span>
                 <span v-else>暂无评分</span>
               </div>
             </div>
           </article>
         </div>
+        <div v-if="hasMore && !loading" class="gal-load-more">
+          <el-button :loading="loadingMore" @click="loadMore">加载更多</el-button>
+        </div>
+        <div v-else class="gal-load-more gal-load-end">已显示全部 {{ galgames.length }} 部</div>
+        </template>
         <div v-else class="gal-empty">
           <p class="gal-empty-text">{{ emptyTitle }}</p>
           <p v-if="emptyDesc" class="gal-empty-desc">{{ emptyDesc }}</p>
@@ -146,13 +152,14 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import api from '../api'
 import { getErrorMessage, resolveAssetUrl } from '../utils/format'
 import { user } from '../store/user'
 import { GALGAME_CATEGORIES, CATEGORY_GROUPS, categoryLabel } from '../constants/galgameCategory'
 
 const router = useRouter()
+const route = useRoute()
 
 // 管理员（admin_level > 0）才显示「审核galgame信息」入口；等级来自 store，认证后实时刷新
 const isAdmin = computed(() => Number(user.value?.admin_level) > 0)
@@ -195,8 +202,8 @@ function onSearchFieldChange() {
   if (searchWord.value.trim()) load()
 }
 
-// 排序：created 默认（管理员添加顺序，最新在上）/ views 总浏览数 /
-// rating 评分 / release_date 发售日期——后三个都是两态切换：
+// 排序：rating 默认（评分从高到低，无评分排最后）/ views 总浏览数 /
+// created 创建顺序 / release_date 发售日期——后三个都是两态切换：
 // 第一下倒序（从高到低/从新到旧，右侧 ↑），再按一下升序（从低到高/从旧到新，右侧 ↓）
 const sortOptions = [
   { value: 'views', label: '总浏览数' },
@@ -204,7 +211,9 @@ const sortOptions = [
   { value: 'release_date', label: '发售日期' },
   { value: 'rating', label: '评分' },
 ]
-const sortBy = ref('created')
+// 支持 /galgame?sort=rating 等 URL 直达（侧边栏「Galgame排行」）；非法值回退默认评分
+const GAL_SORTS = ['created', 'views', 'views_asc', 'rating', 'rating_asc', 'release_date_desc', 'release_date_asc']
+const sortBy = ref(GAL_SORTS.includes(route.query.sort) ? route.query.sort : 'rating')
 
 // 两态排序：按钮 value → { desc, asc } 对应的 sort 参数值（desc 是第一下/默认方向）
 const SORT_DIR = {
@@ -250,6 +259,12 @@ const galgames = ref([])
 const loading = ref(false)
 const loadError = ref('')
 
+// 分页：列表接口按 limit/offset 增量加载（全量 4000+ 部一次渲染会卡死，必须分页）
+const PAGE_SIZE = 60
+const page = ref(1)
+const hasMore = ref(true)
+const loadingMore = ref(false)
+
 // axios 默认把数组序列化成 tags[]=a，后端契约要求重复 key（tags=a&tags=b），这里自定义序列化
 function galParamsSerializer(params) {
   const parts = []
@@ -267,8 +282,11 @@ function galParamsSerializer(params) {
 }
 
 async function load() {
+  // 首次加载 / 筛选、排序、搜索变化：重置到第一页（offset=0），清空已有列表
   loading.value = true
   loadError.value = ''
+  page.value = 1
+  hasMore.value = true
   try {
     const { data } = await api.get('/galgames', {
       params: {
@@ -276,14 +294,45 @@ async function load() {
         sort: sortBy.value,
         q: searchWord.value.trim() || undefined,
         field: searchField.value,
+        limit: PAGE_SIZE,
+        offset: 0,
       },
       paramsSerializer: galParamsSerializer,
     })
     galgames.value = Array.isArray(data) ? data : []
+    hasMore.value = galgames.value.length >= PAGE_SIZE
   } catch (e) {
     loadError.value = getErrorMessage(e, '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+// 加载更多：按已加载页数追加下一页（offset = page*PAGE_SIZE），后端按 offset 分页不重复
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value || loading.value) return
+  loadingMore.value = true
+  try {
+    const { data } = await api.get('/galgames', {
+      params: {
+        categories: selectedCategories.value,
+        sort: sortBy.value,
+        q: searchWord.value.trim() || undefined,
+        field: searchField.value,
+        limit: PAGE_SIZE,
+        offset: page.value * PAGE_SIZE,
+      },
+      paramsSerializer: galParamsSerializer,
+    })
+    const arr = Array.isArray(data) ? data : []
+    galgames.value.push(...arr)
+    hasMore.value = arr.length >= PAGE_SIZE
+    page.value += 1
+  } catch (e) {
+    // 加载更多失败不打断已有列表，保持 hasMore 可重试
+    hasMore.value = true
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -336,6 +385,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.gal-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
+}
+.gal-load-end {
+  color: #909399;
+  font-size: 13px;
+}
 .page {
   width: 100%;
 }

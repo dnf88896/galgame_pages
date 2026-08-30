@@ -494,6 +494,22 @@ html.dark .gal-gallery-upload {
   border-top-color: #2a2a2c;
 }
 
+/* ---- 5.11d 详情页角色 tab 方框网格（深色覆盖） ---- */
+/* 角色卡片：白底 → 深灰，边框 #e4e7ed → 深灰（浅色主题保持白底不变） */
+html.dark .gal-char-card {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+}
+
+/* 角色封面区（无图占位）底色：#f0f2f5 → 深灰 */
+html.dark .gal-char-cover,
+html.dark .gal-char-cover-placeholder {
+  background: #2a2a2c;
+}
+html.dark .gal-char-cover-placeholder {
+  color: #8c8c90;
+}
+
 
 /* ---- 5.12 收藏（PostView 收藏按钮 + ProfileView 收藏统计 + FavoritesView 收藏夹页） ---- */
 /* 收藏按钮：白底 → 深灰 */
@@ -923,4 +939,12 @@ html.dark .gal-contributors-username,
 html.dark .gal-contributors-time,
 html.dark .gal-contributors-empty {
   color: #7f828a;
+}
+
+/* ---- 5.17 用户排行（深色覆盖） ---- */
+html.dark .rank-item:hover {
+  background: #2a2a2c;
+}
+html.dark .rank-hint {
+  color: #8c8c90;
 }

@@ -36,9 +36,10 @@
           </div>
 
           <div class="gal-detail-card">
-            <div class="gal-detail-cover">
+            <!-- Logo：有才显示；无 logo 不渲染占位块（避免左侧空方块）。加载失败回退占位 -->
+            <div v-if="detail.logo_image" class="gal-detail-cover">
               <img
-                v-if="detail.logo_image && !detail._coverError"
+                v-if="!detail._coverError"
                 :src="resolveAssetUrl(detail.logo_image)"
                 :alt="detail.name"
                 @error="coverImgError"
@@ -114,7 +115,7 @@
                     <p v-if="w.description" class="gal-desc">{{ w.description }}</p>
                     <div class="gal-views">
                       <span>浏览 {{ w.view_count || 0 }}</span>
-                      <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(1) }} / 10</span>
+                      <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(2) }} / 10</span>
                       <span v-else>暂无评分</span>
                     </div>
                   </div>

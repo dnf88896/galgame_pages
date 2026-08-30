@@ -42,8 +42,8 @@
         <!-- 作品列表：该标签下已上架作品 -->
         <div class="works-section">
           <h2 class="works-title">作品</h2>
-          <div v-if="detail.works && detail.works.length" class="works-list">
-            <article v-for="w in detail.works" :key="w.id" class="gal-card" @click="goWork(w.id)">
+          <div v-if="works.length" class="works-list">
+            <article v-for="w in works" :key="w.id" class="gal-card" @click="goWork(w.id)">
               <div class="gal-cover">
                 <img
                   v-if="w.image && !w._coverError"
@@ -61,11 +61,14 @@
                 <p v-if="w.description" class="gal-desc">{{ w.description }}</p>
                 <div class="gal-views">
                   <span>浏览 {{ w.view_count || 0 }}</span>
-                  <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(1) }} / 10</span>
+                  <span v-if="w.rating_avg != null">评分 {{ Number(w.rating_avg).toFixed(2) }} / 10</span>
                   <span v-else>暂无评分</span>
                 </div>
               </div>
             </article>
+          </div>
+          <div v-if="hasMoreWorks" class="works-load-more">
+            <el-button :loading="worksLoading" @click="loadMoreWorks">加载更多</el-button>
           </div>
           <div v-else class="works-empty">
             <p class="works-empty-text">暂无使用该标签的作品</p>
@@ -88,24 +91,37 @@ const router = useRouter()
 
 const tagId = route.params.id
 
+// 作品分页：热门标签下作品多，一次全渲染会卡死 → 每页 60 + 加载更多
+const PAGE_SIZE = 60
+
 const detail = ref(null)
 const loading = ref(false)
 const notFound = ref(false)
 const loadError = ref('')
+const works = ref([])
+const worksLoading = ref(false)
 
-// 作品计数：优先详情接口的 galgame_count，兜底 works 数组长度
+// 作品总数：详情接口 galgame_count（该标签下已上架作品数）
+const worksTotal = computed(() => detail.value?.galgame_count ?? 0)
+const hasMoreWorks = computed(() => works.value.length < worksTotal.value)
+
+// 作品计数展示：总数优先 galgame_count，兜底已加载 works 长度
 const tagWorkCount = computed(() => {
   if (detail.value?.galgame_count != null) return detail.value.galgame_count
-  return (detail.value?.works || []).length
+  return works.value.length
 })
 
 async function loadDetail() {
   loading.value = true
   notFound.value = false
   loadError.value = ''
+  works.value = []
   try {
-    const { data } = await api.get(`/galgame-tags/${tagId}`)
+    const { data } = await api.get(`/galgame-tags/${tagId}`, {
+      params: { limit: PAGE_SIZE, offset: 0 },
+    })
     detail.value = data
+    works.value = Array.isArray(data?.works) ? data.works : []
   } catch (e) {
     if (e?.response?.status === 404) {
       notFound.value = true
@@ -114,6 +130,23 @@ async function loadDetail() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+// 加载更多：按已加载条数做 offset 追加下一页（后端按 offset 分页不重复）
+async function loadMoreWorks() {
+  if (worksLoading.value || !hasMoreWorks.value) return
+  worksLoading.value = true
+  try {
+    const { data } = await api.get(`/galgame-tags/${tagId}`, {
+      params: { limit: PAGE_SIZE, offset: works.value.length },
+    })
+    const arr = Array.isArray(data?.works) ? data.works : []
+    works.value.push(...arr)
+  } catch (e) {
+    // 失败不打断已加载列表，按钮可重试
+  } finally {
+    worksLoading.value = false
   }
 }
 
@@ -336,6 +369,11 @@ onMounted(() => {
   margin-top: 10px;
   font-size: 12px;
   color: #909399;
+}
+.works-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
 }
 .works-empty {
   text-align: center;
