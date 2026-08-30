@@ -341,3 +341,9 @@
   - ⚠️ 前端字段契约：`ban_until` 为 null 时被 record NON_NULL 省略（JSON 无该键），页面用 `u.ban_until && new Date(...).getTime() > Date.now()` 判空即可（同 SearchUserView）。
   - 验证：本地接口冒烟 `D:\claude code\headless\..`（12/12：默认分页/萌点降序/分页无重叠/越界回退/超大页码空/与 /users/{id} 不冲突）；本地 headless `verify_user_ranking.js` 10/10（侧边栏入口/页面标题/奖牌色/萌点降序/点击跳转）；部署 `deploy_user_ranking_to_server.py` 服务器冒烟 12/12 + assets 6/6；公网 `verify_user_ranking_prod.js` 10/10（第一名河城荷取 25 萌点）。
 - **部署**：dist 上传 `/opt/galgame/frontend/dist`（先清空防哈希堆积），headless 验证线上 cover 消失、关注页正常。
+
+## 制作人员/角色列表分页（已完成本地与线上，2026-08-30）
+- **根因**：`GET /api/staffs`、`/api/characters` 无分页，一次全量返回（staffs 28965 条 / characters 36345 条）+ 前端一次渲染全部卡片（含图片）→ 服务器传输/渲染超时（axios 10s）。本地卡顿但能显示、服务器直接 timeout。用户提示「可能是图片太多，用 galgame 的加载更多逻辑」，确认是「全量无分页」。
+- **后端**：`StaffDao.findAll` / `CharacterDao.findAll` 签名加 `(Long limit, Long offset)`（orderBy 后追加 `LIMIT ?` / `OFFSET ?`，`limit>0` 才启用，不传返回全部与旧行为一致——对齐 GalgameDao 模式）；`StaffController.list` / `CharacterController.list` 加 `@RequestParam(value="limit"/"offset", required=false) Long` 透传。
+- **前端**：`StaffView.vue` / `CharacterView.vue` 复用 GalgameView「加载更多」模式——`PAGE_SIZE=60`、`page/hasMore/loadingMore` refs；`load()` 重置 `page=1/hasMore=true` + 传 `limit:PAGE_SIZE, offset:0`，返回后 `hasMore = list.length >= PAGE_SIZE`；`loadMore()` 追加 `offset: page*PAGE_SIZE` + push + `page+=1`，失败保持 `hasMore=true` 可重试；模板空态后加 `.gal-load-more` 加载更多按钮（`v-if="hasMore && !loading"`）；`.gal-load-more { display:flex; justify-content:center; padding:24px 0 8px; }`。两页均无数组参数（tags/categories 只存在于 galgames），无需 galParamsSerializer。
+- **验证**：本地冒烟 `D:\claude code\staff_char_pagination_smoke.py` **12/12 PASS**（limit=60 正确、两页无重叠、id 连续、无参数全量兼容、搜索分页、sort+limit 叠加）；部署 `D:\claude code\deploy_staff_char_pagination_to_server.py` 服务器冒烟 **10/10 PASS** + 公网 assets 6/6 + home/api 200。

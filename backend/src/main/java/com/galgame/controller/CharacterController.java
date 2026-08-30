@@ -80,12 +80,14 @@ public class CharacterController {
     public record ReviewRequest(String status, String reason) {
     }
 
-    /** 1. 角色列表（公开），?q= 名称模糊搜索、?sort= 排序（created 默认/views），均可选 */
+    /** 1. 角色列表（公开），?q= 名称模糊搜索、?sort= 排序（created 默认/views）、?limit/?offset= 分页（可选，不传返回全部），均可选 */
     @GetMapping
     public ResponseEntity<Object> list(
             @RequestParam(value = "q", required = false) String q,
-            @RequestParam(value = "sort", required = false) String sort) {
-        return ResponseEntity.ok(characterDao.findAll(trimToNull(q), sort));
+            @RequestParam(value = "sort", required = false) String sort,
+            @RequestParam(value = "limit", required = false) Long limit,
+            @RequestParam(value = "offset", required = false) Long offset) {
+        return ResponseEntity.ok(characterDao.findAll(trimToNull(q), sort, limit, offset));
     }
 
     /** 2. 待审核列表（管理员）：返回 status='pending' 的角色（含提交人昵称 creator）。精确路径 /pending 优先于 /{id} 模板。 */

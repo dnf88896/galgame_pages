@@ -95,23 +95,23 @@ goto wait_mysql_loop
 
 :mysql_ready
 
-REM ============ 3. backend 8080 ============
+REM ============ 3. backend 8081 ============
 echo [2/4] Check backend ...
-netstat -ano | findstr ":8080 " | findstr "LISTENING" >nul
+netstat -ano | findstr ":8081 " | findstr "LISTENING" >nul
 if errorlevel 1 (
     set "DB_PORT=!DBPORT!"
     if exist "%~dp0backend\target\galgame-backend-0.0.1-SNAPSHOT.jar" (
         echo     Not running. Starting backend - java -jar ...
-        start "KUN-Backend" /d "%~dp0backend" /min cmd /c "java -jar target\galgame-backend-0.0.1-SNAPSHOT.jar > app.log 2>&1"
+        start "KUN-Backend" /d "%~dp0backend" /min cmd /c "java -jar target\galgame-backend-0.0.1-SNAPSHOT.jar --server.port=8081 > app.log 2>&1"
     ) else (
         echo     Not running. Starting backend - mvn spring-boot:run ...
-        start "KUN-Backend" /d "%~dp0backend" /min cmd /c "mvn spring-boot:run > app.log 2>&1"
+        start "KUN-Backend" /d "%~dp0backend" /min cmd /c "mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081 > app.log 2>&1"
     )
 ) else (
     echo     Already running.
 )
 echo     Waiting for backend ...
-call :wait_port 8080
+call :wait_port 8081
 
 REM ============ 4. frontend 5173 ============
 echo [3/4] Check frontend ...
@@ -133,7 +133,7 @@ start "" "http://localhost:5173"
 echo.
 echo ============================================
 echo   All services started! Forum is up.
-echo   MySQL port: !DBPORT!   Backend: 8080   Frontend: 5173
+echo   MySQL port: !DBPORT!   Backend: 8081   Frontend: 5173
 echo   They run in minimized windows in the background.
 echo   To stop, double-click stop-forum.bat.
 echo ============================================

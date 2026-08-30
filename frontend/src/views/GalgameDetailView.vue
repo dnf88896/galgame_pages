@@ -81,9 +81,18 @@
               <div class="gal-detail-meta">
                 <span v-if="detail.creator">提交人：{{ detail.creator }}</span>
                 <span v-if="detail.release_date">发售：{{ detail.release_date }}</span>
-                <span>评分：{{ detail.rating_avg != null ? `${Number(detail.rating_avg).toFixed(2)} / 10` : '暂无' }}<template v-if="detail.rating_count > 0">（{{ detail.rating_count }} 人评分）</template></span>
                 <span v-if="detail.created_at">创建：{{ formatTime(detail.created_at) }}</span>
                 <span v-if="detail.updated_at">更新：{{ formatTime(detail.updated_at) }}</span>
+              </div>
+              <!-- 评分高亮块：大号金色评分 + 人数（无评分显示暂无） -->
+              <div class="gal-big-rating">
+                <template v-if="detail.rating_avg != null">
+                  <span class="gal-big-score">{{ Number(detail.rating_avg).toFixed(2) }}</span>
+                  <span class="gal-big-denom">/ 10</span>
+                  <span v-if="detail.rating_count > 0" class="gal-big-count">★ {{ detail.rating_count }} 人评分</span>
+                  <span v-else class="gal-big-count">暂无评分人数</span>
+                </template>
+                <span v-else class="gal-big-score gal-big-none">暂无评分</span>
               </div>
               <!-- 分类（旧系统 section_key → 中文小 tag，纯展示不可点）；无分类不渲染 -->
               <div v-if="(detail.categories || []).length" class="gal-cat-row">
@@ -1432,6 +1441,33 @@ onMounted(async () => {
   margin-top: 16px;
   color: #909399;
   font-size: 13px;
+}
+/* 评分高亮块：大号金色分数 + 人数（详情页，醒目展示） */
+.gal-big-rating {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 14px;
+}
+.gal-big-score {
+  font-size: 34px;
+  font-weight: 800;
+  color: #f7b731;
+  line-height: 1;
+}
+.gal-big-denom {
+  font-size: 16px;
+  color: #909399;
+}
+.gal-big-count {
+  font-size: 14px;
+  color: #e6a23c;
+  margin-left: 4px;
+}
+.gal-big-none {
+  font-size: 20px;
+  font-weight: 600;
+  color: #909399;
 }
 /* 分类行（旧系统 section_key → 中文小 tag）：复用 .gal-tag，仅容器/标签文字样式 */
 .gal-cat-row {

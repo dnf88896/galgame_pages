@@ -151,7 +151,7 @@ public class CharacterDao {
      * 角色列表（公开，仅已上架）。固定过滤 status='approved'；q 按名称模糊匹配；
      * sort：created（默认）按创建时间倒序 / views 总浏览数倒序。
      */
-    public List<Character> findAll(String q, String sort) {
+    public List<Character> findAll(String q, String sort, Long limit, Long offset) {
         StringBuilder sql = new StringBuilder("SELECT " + BASE_COLUMNS + " FROM characters ch WHERE 1=1 AND ch.status = 'approved'");
         List<Object> args = new ArrayList<>();
         if (q != null && !q.isBlank()) {
@@ -159,6 +159,15 @@ public class CharacterDao {
             args.add(q.trim());
         }
         sql.append(orderBy(sort));
+        // 分页（可选）：limit>0 才启用，offset 默认 0。其它调用方不传 → 返回全部（与旧行为一致）
+        if (limit != null && limit > 0) {
+            sql.append(" LIMIT ?");
+            args.add(limit);
+            if (offset != null && offset > 0) {
+                sql.append(" OFFSET ?");
+                args.add(offset);
+            }
+        }
         return jdbcTemplate.query(sql.toString(), CHARACTER_ROW_MAPPER, args.toArray());
     }
 

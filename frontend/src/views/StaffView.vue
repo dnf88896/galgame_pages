@@ -99,6 +99,9 @@
           <p class="gal-empty-text">{{ emptyTitle }}</p>
           <p v-if="emptyDesc" class="gal-empty-desc">{{ emptyDesc }}</p>
         </div>
+        <div v-if="hasMore && !loading" class="gal-load-more">
+          <el-button :loading="loadingMore" @click="loadMore">加载更多</el-button>
+        </div>
       </template>
     </div>
   </div>
@@ -178,20 +181,56 @@ const staffs = ref([])
 const loading = ref(false)
 const loadError = ref('')
 
+// 分页：列表接口按 limit/offset 增量加载（全量 30000+ 条一次渲染会超时/卡死，必须分页）
+const PAGE_SIZE = 60
+const page = ref(1)
+const hasMore = ref(true)
+const loadingMore = ref(false)
+
 async function load() {
+  // 首次加载 / 搜索、排序变化：重置到第一页（offset=0），清空已有列表
   loading.value = true
   loadError.value = ''
+  page.value = 1
+  hasMore.value = true
   try {
     const params = {
       q: searchWord.value.trim() || undefined,
       sort: sortBy.value,
+      limit: PAGE_SIZE,
+      offset: 0,
     }
     const { data } = await api.get('/staffs', { params })
     staffs.value = Array.isArray(data) ? data : []
+    hasMore.value = staffs.value.length >= PAGE_SIZE
   } catch (e) {
     loadError.value = getErrorMessage(e, '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+// 加载更多：按已加载页数追加下一页（offset = page*PAGE_SIZE），后端按 offset 分页不重复
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value || loading.value) return
+  loadingMore.value = true
+  try {
+    const params = {
+      q: searchWord.value.trim() || undefined,
+      sort: sortBy.value,
+      limit: PAGE_SIZE,
+      offset: page.value * PAGE_SIZE,
+    }
+    const { data } = await api.get('/staffs', { params })
+    const arr = Array.isArray(data) ? data : []
+    staffs.value.push(...arr)
+    hasMore.value = arr.length >= PAGE_SIZE
+    page.value += 1
+  } catch (e) {
+    // 加载更多失败不打断已有列表，保持 hasMore 可重试
+    hasMore.value = true
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -457,6 +496,11 @@ onMounted(() => {
   margin-top: 10px;
   font-size: 12px;
   color: #909399;
+}
+.gal-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
 }
 .gal-error {
   margin-bottom: 16px;

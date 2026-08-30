@@ -129,9 +129,9 @@
                 <span v-else class="gal-no-link">暂无资源链接</span>
               </div>
               <div class="gal-views">
+                <span v-if="p.rating_avg != null" class="gal-rate-hi">★ {{ Number(p.rating_avg).toFixed(2) }} / 10</span>
+                <span v-else class="gal-rate-none">暂无评分</span>
                 <span>浏览 {{ p.view_count || 0 }}</span>
-                <span v-if="p.rating_avg != null">评分 {{ Number(p.rating_avg).toFixed(2) }} / 10</span>
-                <span v-else>暂无评分</span>
               </div>
             </div>
           </article>
@@ -689,6 +689,16 @@ onMounted(() => {
   margin-top: 10px;
   font-size: 12px;
   color: #909399;
+}
+/* 列表卡评分：金色加粗醒目，无评分灰色小字 */
+.gal-rate-hi {
+  color: #f7b731;
+  font-weight: 700;
+  font-size: 14px;
+}
+.gal-rate-none {
+  color: #b0b3b8;
+  font-size: 12px;
 }
 .gal-error {
   margin-bottom: 16px;
