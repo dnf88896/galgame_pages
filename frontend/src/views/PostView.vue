@@ -249,7 +249,8 @@
         <el-dialog
           v-model="reportDialogVisible"
           title="举报"
-          width="440px"
+          width="90%"
+          style="max-width: 440px"
           :close-on-click-modal="false"
           @closed="reportReason = ''"
         >
@@ -270,7 +271,8 @@
         <el-dialog
           v-model="categoryDialogVisible"
           title="修改分区"
-          width="420px"
+          width="90%"
+          style="max-width: 420px"
           :close-on-click-modal="false"
         >
           <el-select v-model="editCategory" placeholder="选择分区" style="width: 100%">
@@ -686,8 +688,9 @@ onMounted(() => {
 }
 .post-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   font-size: 13px;
   color: #666;
   margin-bottom: 10px;
@@ -722,6 +725,7 @@ onMounted(() => {
 }
 .post-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 16px;

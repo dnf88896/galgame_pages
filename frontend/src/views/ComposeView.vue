@@ -361,8 +361,9 @@ onMounted(async () => {
 }
 .compose-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
 }
 .form-status {
   font-size: 13px;
@@ -389,8 +390,9 @@ onMounted(async () => {
 /* 封面图预览 */
 .cover-picked {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   margin-top: 8px;
   width: 100%;
 }

@@ -426,6 +426,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* 手机端：三个入口按钮在标题行放不下，改为独占一行并允许换行，避免被裁掉 */
+@media (max-width: 640px) {
+  .gal-header-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .gal-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 .gal-review-btn {
   border: 1px solid #e6a23c;
@@ -629,6 +642,8 @@ onMounted(() => {
   font-weight: 700;
   color: #303133;
   margin: 0;
+  /* 长英文名无空格不可断，会撑破卡片并让整页横向滚动 */
+  word-break: break-word;
 }
 .gal-tags {
   display: flex;
@@ -674,6 +689,11 @@ onMounted(() => {
   line-height: 1.5;
   cursor: pointer;
   transition: all 0.15s;
+  /* 无 label 时按钮文案是整条 URL（不可断的长串），窄屏会撑破卡片导致整页横滚 */
+  max-width: 100%;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .gal-link:hover {
   background: #409eff;

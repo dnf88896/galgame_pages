@@ -411,10 +411,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 8px;
   margin-bottom: 16px;
 }
 .gal-detail-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .gal-detail-card {
@@ -429,8 +432,9 @@ onMounted(() => {
 }
 .gal-detail-cover {
   flex-shrink: 0;
+  align-self: flex-start;
   width: 240px;
-  height: 240px;
+  max-width: 100%;
   border-radius: 6px;
   overflow: hidden;
   background: #f5f7fa;
@@ -438,13 +442,12 @@ onMounted(() => {
 }
 .gal-detail-cover img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
   display: block;
 }
 .gal-detail-cover-placeholder {
   width: 100%;
-  height: 100%;
+  height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -659,5 +662,22 @@ onMounted(() => {
   font-weight: 600;
   color: #909399;
   margin: 0;
+}
+
+/* ===== 移动端适配：窄屏下详情卡封面与文字上下堆叠，避免文字区被 240px 封面挤成一条线 ===== */
+@media (max-width: 640px) {
+  .gal-detail-card {
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+  .gal-detail-card .gal-detail-cover {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+  }
+  .gal-detail-card .gal-detail-cover-placeholder {
+    height: 180px;
+  }
 }
 </style>

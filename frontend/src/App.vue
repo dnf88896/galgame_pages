@@ -275,4 +275,35 @@ watch(unreadRefreshKey, () => loadUnread())
   color: #909399;
   margin: 0 0 20px;
 }
+
+/* ===== 移动端适配：窄屏压缩顶栏，保证「举报受理 / 消息 / 头像 / 退出」全部可见可点 ===== */
+@media (max-width: 640px) {
+  .nav-inner {
+    padding: 0 10px;
+    gap: 8px;
+  }
+  /* 品牌名允许收缩省略，避免把右侧按钮挤出屏幕 */
+  .nav-brand {
+    font-size: 15px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 窄屏隐藏用户名文字（头像仍可点进个人主页），给操作按钮腾出空间 */
+  .nav-username {
+    display: none;
+  }
+  .nav-right {
+    gap: 8px;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+  .nav-link {
+    font-size: 13px;
+  }
+  .nav-report-btn {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+}
 </style>

@@ -2,7 +2,8 @@
   <el-dialog
     v-model="visible"
     :title="`投票日志${poll ? '「' + poll.title + '」' : ''}`"
-    width="560px"
+    width="90%"
+    style="max-width: 560px"
     @open="load"
   >
     <div v-if="loading" class="log-loading">

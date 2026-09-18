@@ -135,6 +135,32 @@ onMounted(() => load(1))
 .rank-badge.top3 {
   background: #d09a6b;
 }
+/* 用户信息区：模板里的 .user-* 类此前没有对应样式（scoped 样式不跨组件，
+   只在 SearchUserView 里定义过），导致昵称被压成竖条、「✦ N 萌点」被顶出屏幕 */
+.user-meta {
+  flex: 1;
+  min-width: 0;
+}
+.user-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-weight: 500;
+  color: #303133;
+  word-break: break-word;
+}
+.user-bio {
+  font-size: 13px;
+  color: #909399;
+  margin-top: 2px;
+  word-break: break-word;
+}
+.user-avatar-text {
+  background: #409eff;
+  color: #fff;
+  font-weight: 600;
+}
 .rank-moe {
   margin-left: auto;
   flex-shrink: 0;

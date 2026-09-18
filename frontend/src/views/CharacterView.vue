@@ -294,6 +294,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* 手机端：三个入口按钮在标题行放不下，改为独占一行并允许换行，避免被裁掉 */
+@media (max-width: 640px) {
+  .gal-header-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .gal-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 .gal-review-btn {
   border: 1px solid #e6a23c;
@@ -479,6 +492,8 @@ onMounted(() => {
   font-weight: 700;
   color: #303133;
   margin: 0;
+  /* 长英文名无空格不可断，会撑破卡片并让整页横向滚动 */
+  word-break: break-word;
 }
 .gal-desc {
   margin: 8px 0 0;

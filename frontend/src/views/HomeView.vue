@@ -20,6 +20,10 @@
 
       <div class="home-center">
         <header class="topbar">
+          <!-- 手机端：左侧导航列在窄屏被隐藏，改由这个按钮打开抽屉 -->
+          <button class="mobile-nav-btn" type="button" @click="navDrawerOpen = true">
+            <span class="mobile-nav-icon">☰</span>板块
+          </button>
           <div class="topbar-actions">
         <el-dropdown trigger="click" @command="onSortCommand">
           <el-button class="filter-btn">
@@ -48,6 +52,24 @@
         <el-button type="primary" @click="goCompose">发布话题</el-button>
       </div>
     </header>
+
+    <!-- 手机端板块导航抽屉：复用左侧栏的两级导航数据，触屏可点 -->
+    <el-drawer v-model="navDrawerOpen" direction="ltr" size="76%" title="板块导航">
+      <div class="drawer-nav">
+        <div v-for="group in leftNavGroups" :key="group.label" class="drawer-nav-group">
+          <div class="drawer-nav-title">{{ group.label }}</div>
+          <button
+            v-for="child in group.children"
+            :key="child.label"
+            class="drawer-nav-btn"
+            type="button"
+            @click="onDrawerNavClick(child)"
+          >
+            {{ child.label }}
+          </button>
+        </div>
+      </div>
+    </el-drawer>
 
         <div class="home-grid">
       <aside class="side-nav">
@@ -155,7 +177,7 @@
   </div>
 
     <!-- 发布公告：仅 1 级管理员可用，普通用户点击提示去认证 -->
-    <el-dialog v-model="annDialogVisible" title="发布公告" width="480px">
+    <el-dialog v-model="annDialogVisible" title="发布公告" width="90%" style="max-width: 480px">
       <el-form label-position="top">
         <el-form-item label="公告标题">
           <el-input v-model="annForm.title" maxlength="100" placeholder="公告标题" />
@@ -216,6 +238,9 @@ const route = useRoute()
 const posts = ref([])
 const loading = ref(false)
 const loadError = ref('')
+
+// 手机端板块导航抽屉开关（左侧栏在 ≤900px 被隐藏，改用抽屉承载）
+const navDrawerOpen = ref(false)
 
 // kungal 风格最左侧导航列（占位数据，后续替换为真实入口）
 // 一级按钮 hover 在右侧浮出子按钮；带 to 的子按钮点击会跳转
@@ -410,6 +435,12 @@ function goCompose() {
 }
 
 // 左侧边栏子按钮统一点击：all=回到全部话题；to=跳转路由；action=自定义动作（发布公告）
+// 抽屉里点了子项：先关抽屉再执行与左侧栏一致的跳转/提示
+function onDrawerNavClick(child) {
+  navDrawerOpen.value = false
+  onLeftNavChildClick(child)
+}
+
 function onLeftNavChildClick(child) {
   if (child.all) {
     goAllTopics()
@@ -592,8 +623,9 @@ onMounted(() => {
 }
 .post-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   font-size: 13px;
   color: #666;
   margin-bottom: 10px;
@@ -854,13 +886,44 @@ onMounted(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-/* 中屏：隐藏最左侧导航列（占位阶段） */
+/* 手机端板块导航按钮：宽屏隐藏，左侧栏一藏就用它顶上 */
+.mobile-nav-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  color: #606266;
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mobile-nav-btn:hover {
+  color: #409eff;
+  border-color: #409eff;
+}
+.mobile-nav-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* 中屏：隐藏最左侧导航列，改由顶栏「板块」按钮打开抽屉（触屏无 hover，浮出子菜单点不到） */
 @media (max-width: 900px) {
   .home-layout {
     grid-template-columns: 1fr;
   }
   .left-nav {
     display: none;
+  }
+  .mobile-nav-btn {
+    display: inline-flex;
+  }
+  /* 顶栏变成「板块按钮靠左 / 操作区靠右」，避免按钮被挤到屏幕外 */
+  .topbar {
+    justify-content: space-between;
+    gap: 8px;
   }
 }
 
@@ -873,8 +936,13 @@ onMounted(() => {
     position: static;
     flex-direction: row;
     overflow-x: auto;
+    /* grid 子项默认 min-width:auto，会被 6 个 148px 按钮撑破轨道 → 整页横向滚动 */
+    min-width: 0;
     padding: 8px;
     gap: 6px;
+  }
+  .main-col {
+    min-width: 0;
   }
   .side-title {
     display: none;
@@ -885,6 +953,45 @@ onMounted(() => {
   .board-desc {
     display: none;
   }
+  /* 操作区允许换行：搜索框独占一行，排序/发布留在上一行，否则三者挤不下被裁掉 */
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .search-input {
+    width: 100%;
+    order: 10;
+  }
+}
+
+/* 抽屉里的两级导航（触屏可直接点，替代原来靠 :hover 弹出的子菜单） */
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.drawer-nav-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #909399;
+  margin-bottom: 8px;
+}
+.drawer-nav-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: #303133;
+  background: #f5f7fa;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.drawer-nav-btn:active {
+  background: #e4e7ed;
+  color: #409eff;
 }
 
 /* 发布公告弹窗的媒体附件已选列表（行内 flex、浅灰底、小圆角） */

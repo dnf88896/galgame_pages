@@ -117,10 +117,16 @@ async function doSearch() {
 }
 .user-name {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   font-weight: 500;
   color: #303133;
+}
+/* 长英文用户名（无可断点）会把「管理员/已封禁」标签挤出卡片被裁 → 允许在任意位置断行 */
+.user-name > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .user-bio {
   font-size: 13px;

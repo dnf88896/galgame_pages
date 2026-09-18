@@ -310,6 +310,11 @@ onMounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: #303133;
+  /* 长英文昵称不可断行，会把时间与未读角标推出卡片 → 单行省略 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .conv-time {
   font-size: 12px;

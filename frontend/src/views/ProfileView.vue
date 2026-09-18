@@ -160,7 +160,8 @@
       <el-dialog
         v-model="passwordDialogVisible"
         title="修改密码"
-        width="420px"
+        width="90%"
+        style="max-width: 420px"
         :close-on-click-modal="false"
         @closed="resetPasswordForm"
       >
@@ -515,8 +516,9 @@ onMounted(() => load())
 }
 .profile-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 12px 16px;
 }
 .avatar-text {
   background: #409eff;
@@ -589,6 +591,7 @@ onMounted(() => load())
 }
 .profile-stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 20px;
 }
@@ -656,10 +659,14 @@ onMounted(() => load())
 .avatar-upload {
   margin-top: 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-size: 14px;
   color: #606266;
+}
+.avatar-upload input[type='file'] {
+  max-width: 100%;
 }
 .hide-favorites-row {
   margin-top: 16px;
@@ -717,5 +724,23 @@ onMounted(() => load())
   padding: 2px 7px;
   line-height: 1.4;
   flex-shrink: 0;
+}
+
+/* ===== 移动端适配 ===== */
+@media (max-width: 600px) {
+  /* 6 个统计格挤不进一行，最后一个「收藏」入口会被卡片 overflow:hidden 裁掉 → 改 3 列 2 行 */
+  .profile-stats {
+    gap: 10px;
+  }
+  .profile-stats .stat {
+    flex: 1 1 calc(33.333% - 7px);
+  }
+  /* 头像 + 信息 + 萌点框在窄屏挤成一团，让萌点框独占一行 */
+  .profile-head .moe-box {
+    margin-left: 0;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+  }
 }
 </style>

@@ -51,7 +51,10 @@ function pick(e) {
   border: 1px solid #e4e7ed;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  width: 296px;
+  /* 跟随容器宽度（手机输入框很窄，固定 296px 会被「发送」按钮压住最右一列），宽屏仍是 296px */
+  width: 100%;
+  max-width: 296px;
+  box-sizing: border-box;
   max-height: 208px;
   overflow-y: auto;
 }

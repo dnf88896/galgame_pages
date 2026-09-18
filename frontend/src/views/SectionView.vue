@@ -342,8 +342,9 @@ onMounted(async () => {
 }
 .post-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   font-size: 13px;
   color: #666;
   margin-bottom: 10px;

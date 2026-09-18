@@ -19,7 +19,8 @@
     <el-dialog
       v-model="pickerVisible"
       title="选择标签"
-      width="640px"
+      width="90%"
+      style="max-width: 640px"
       :close-on-click-modal="false"
     >
       <el-input
@@ -59,7 +60,8 @@
     <el-dialog
       v-model="dialogVisible"
       title="新建标签"
-      width="440px"
+      width="90%"
+      style="max-width: 440px"
       :close-on-click-modal="false"
       @closed="resetCreateForm"
     >
@@ -293,7 +295,8 @@ onMounted(loadAll)
   margin-bottom: 12px;
 }
 .gal-tag-picker-body {
-  max-height: 420px;
+  /* 手机上限 50vh，保证弹窗页脚的「确定」按钮始终可见（不必滚动整屏去找） */
+  max-height: min(420px, 50vh);
   overflow-y: auto;
   padding-right: 4px;
 }

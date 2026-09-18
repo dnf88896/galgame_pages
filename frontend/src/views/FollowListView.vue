@@ -171,10 +171,15 @@ onMounted(() => load())
   min-width: 0;
 }
 .user-name {
+  display: block;
   color: #303133;
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
+  /* 长英文昵称会横向溢出压住右侧「关注」按钮 → 单行省略 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .user-name:hover {
   color: #409eff;

@@ -278,7 +278,8 @@ onBeforeUnmount(stopPolling)
 .chat-page {
   max-width: 720px;
   margin: 0 auto;
-  height: calc(100vh - 52px);
+  height: calc(100vh - 52px); /* 旧浏览器兜底 */
+  height: calc(100dvh - 52px); /* 动态视口：手机键盘/地址栏弹出时自动缩小，输入框与「发送」不会被遮住 */
   padding: 0 16px;
   display: flex;
   flex-direction: column;

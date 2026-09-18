@@ -257,6 +257,7 @@ async function removePoll() {
 }
 .poll-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -339,6 +340,8 @@ async function removePoll() {
   font-size: 14px;
   color: #303133;
   line-height: 1.4;
+  /* 长英文/数字选项无空格不可断，会撑破选项框并让整页横向滚动 */
+  word-break: break-word;
 }
 .option-stats {
   display: flex;

@@ -2,7 +2,8 @@
   <el-drawer
     :model-value="modelValue"
     @update:model-value="onUpdate"
-    size="380px"
+    size="88%"
+    style="max-width: 380px"
     title="设置"
   >
     <div class="settings-panel">
@@ -266,6 +267,7 @@ function onFileChange(e) {
 
 .admin-verify-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 12px;

@@ -71,7 +71,7 @@
       </article>
     </el-card>
 
-    <el-dialog v-model="banDialogVisible" title="删除并封禁" width="360px">
+    <el-dialog v-model="banDialogVisible" title="删除并封禁" width="90%" style="max-width: 360px">
       <p style="margin: 0 0 8px; color: #606266">选择封禁时长：</p>
       <el-radio-group v-model="banDuration">
         <el-radio value="1">1 天</el-radio>
@@ -254,6 +254,7 @@ onMounted(load)
 }
 .report-bottom {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -270,8 +271,16 @@ onMounted(load)
 }
 .report-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* 手机端：举报原因独占一行保证可读，三个处理按钮可换行，避免被挤出屏幕 */
+@media (max-width: 640px) {
+  .report-reason {
+    flex: 1 1 100%;
+  }
 }
 </style>

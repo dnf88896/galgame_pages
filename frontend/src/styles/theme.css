@@ -21,6 +21,8 @@
 
 /* ============================ 2. body 基础背景 ============================ */
 body {
+  /* 清掉 UA 默认 margin:8px —— 否则窄屏白丢 16px 横向宽度（手机上占比明显） */
+  margin: 0;
   min-height: 100vh;
   background-color: #f0f2f5;          /* 浅色默认背景 */
   transition: background-color 0.3s;
@@ -893,6 +895,9 @@ html.dark .gal-origin-line {
   font-size: 15px;
   font-weight: 600;
   color: #303133;
+  /* 长英文昵称不可断行，会横向溢出卡片 → 允许断行 */
+  min-width: 0;
+  word-break: break-word;
 }
 .gal-contributors-username {
   font-size: 13px;
@@ -947,4 +952,27 @@ html.dark .rank-item:hover {
 }
 html.dark .rank-hint {
   color: #8c8c90;
+}
+
+/* ---- 5.18 首页移动端板块导航（顶栏「板块」按钮 + 抽屉，深色覆盖） ---- */
+html.dark .mobile-nav-btn {
+  background: #1d1e1f;
+  border-color: #3a3a3c;
+  color: #c0c4cc;
+}
+html.dark .mobile-nav-btn:hover,
+html.dark .mobile-nav-btn:active {
+  color: #409eff;
+  border-color: #409eff;
+}
+html.dark .drawer-nav-title {
+  color: #8c8c90;
+}
+html.dark .drawer-nav-btn {
+  background: #2a2a2c;
+  color: #c0c4cc;
+}
+html.dark .drawer-nav-btn:active {
+  background: #3a3a3c;
+  color: #409eff;
 }

@@ -2,7 +2,8 @@
   <el-dialog
     v-model="visible"
     :title="isEdit ? '编辑投票' : '创建投票'"
-    width="560px"
+    width="90%"
+    style="max-width: 560px"
     :close-on-click-modal="false"
   >
     <div class="poll-form">

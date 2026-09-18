@@ -426,7 +426,8 @@
           <el-dialog
             v-model="reportDialogVisible"
             title="举报"
-            width="440px"
+            width="90%"
+            style="max-width: 440px"
             :close-on-click-modal="false"
             @closed="reportReason = ''"
           >
@@ -587,7 +588,7 @@
           </el-form>
 
           <!-- 画廊编辑弹窗：查看 / 上传 / 删除画廊图片（写操作即时生效，关闭不丢主表单） -->
-          <el-dialog v-model="galleryEditorVisible" title="编辑画廊" width="660px" :close-on-click-modal="false">
+          <el-dialog v-model="galleryEditorVisible" title="编辑画廊" width="90%" style="max-width: 660px" :close-on-click-modal="false">
             <div v-if="(detail.gallery || []).length" class="gal-gallery-grid">
               <div v-for="img in detail.gallery" :key="img.id" class="gal-gallery-item">
                 <img
@@ -2191,5 +2192,23 @@ onMounted(async () => {
 }
 .gal-related-select {
   width: 100%;
+}
+
+/* ===== 手机端适配 ===== */
+@media (max-width: 760px) {
+  /* 封面固定 280px 且 flex-shrink:0，并排时把信息区压成约 24px，
+     标题/标签/评分/按钮全被挤出屏幕 → 窄屏改为上下排列 */
+  .gal-detail-card {
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+  .gal-detail-cover {
+    width: 100%;
+    max-width: 240px;
+    height: auto;
+    aspect-ratio: 7 / 9;
+    align-self: center;
+  }
 }
 </style>
