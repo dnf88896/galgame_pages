@@ -13,6 +13,22 @@
 - `spring.jackson.property-naming-strategy=SNAKE_CASE` 自动处理 record → snake_case JSON。
 - 表结构：新表 `galgames`/`galgame_tags`（Galgame 作品库）由 schema.sql 每次启动自动建（IF NOT EXISTS 幂等），**无需改 DatabaseMigrator**。
 
+## 单元测试与集成测试（2026-09-20，本地与服务器源码镜像已同步）
+- **位置**：`backend/src/test/java/com/galgame/`——`unit/`（4 类 55 条纯单元）+ `integration/`（6 类 65 条集成）+ `GalgameBackendApplicationTests`（3 条基础设施守卫），**共 123 条**。测试配置 `backend/src/test/resources/application-test.properties`。一键跑：`backend/run-tests.bat`（双击即可）。
+- **跑法**：`cd backend && mvn -B test`（本地已 123/123 全绿，约 13 秒）；单类 `mvn -B test -Dtest=AuthIntegrationTest`；多类用**逗号**分隔（`-Dtest=A,B`；用 `+` 会报 "No tests matching pattern"）。中文断言建议加 `-Dfile.encoding=UTF-8` 否则失败信息乱码。
+- **单元 vs 集成**：单元测试（`TagConstants` 标签常量表、`TokenService.sha256Hex`、`MentionService` 的 `MENTION_PATTERN` 解析、`AdminLevels` 管理员密码映射）= 不启动 Spring、不连库、毫秒级、零 mock，只测纯函数/不可变数据结构；集成测试 = `@SpringBootTest` + `MockMvc` 发真 HTTP 请求走 Controller→Service→DAO→MySQL 全链路，秒级。
+- ⚠️ **测试库隔离（最重要的一条防线）**：集成测试基类 `IntegrationTestBase` 带 `@ActiveProfiles("test")`，`application-test.properties` 只覆盖 `spring.datasource.url` 指向独立的 **`galgame_test`** 库，其余配置继承 main。**绝不能**让测试连开发库 `galgame`（真实用户/帖子数据会被测试的写入与清理洗掉）。`GalgameBackendApplicationTests` 里有一条断言 `SELECT DATABASE()` 必须是 `galgame_test` 的守卫测试，改配置连错库会立刻变红。
+- **建测试库**：`galgame_test` 需存在且 `galgame` 账号有权限（脚本 `D:\claude code\_make_test_db.py`，建库+授权，不含凭据）。表结构由 schema.sql 在测试启动时自动建，无需手工建表。
+- ⚠️ **测试不依赖凭据**：需要管理员身份时用基类 `registerAdmin(prefix)`（先正常注册，再 `UPDATE users SET admin_level=1`），**不调用** `/auth/admin-verify`，所以测试代码里不出现任何管理员密码明文。`AdminLevelsTest` 只测否定侧（错误密码返回 null），同样不写明文。
+- **基类提供的工具**：`uniqueName(prefix)`（`前缀_运行标签_序号`，防跨次运行撞唯一键）、`registerActor/registerAdmin`、`body(MvcResult)`（显式 UTF-8 解析，避免中文断言乱码——**不要**用 `jsonPath` 比中文）、`map(...)`（支持 null 值的请求体构造）。
+- **测试有效性靠「变异验证」证明**：给已有代码补测试会立刻变绿、本身证明不了任何东西。故每次都故意破坏实现、确认对应测试变红。已做 5 轮：① 改测试库 url 为不存在的库 → 连接被拒（证明 profile 真生效，连错库会崩而非静默跑开发库）；② 注释掉改密码后的 `authTokenDao.deleteByUser` + 昵称上限 32 改 40 → 恰好 2 条红；③ 评分增量公式改覆盖式 / `rating DESC` 改 `ASC` / `Long.equals` 改 `!=` → 恰好 3 条红（`第二人评分增量平均`、`按评分排序`、`作者删自己galgame评论_防Long引用比较回归` `expected:<200> but was:<403>`），其余 20 条绿；④ @边界修复后把正则改回旧版 → 恰好 4 条红（3 集成 + 1 单元，全是 `Expected size: 1 but was: 0`，即「通知没送到」）。精确定位后才证明测试真在抓 bug。
+- **服务器不装 Maven、不跑测试**：JDK 17 有但无 `mvn`（无 `/root/.m2`）。约定 = 测试在本地跑，服务器只保持**源码镜像**同步（`D:\claude code\sync_source_to_server.py` 的 `INCLUDE` 已含整个 `backend/src`，测试源码自动随之同步到 `/opt/galgame/src/backend/src/test/`，已核实 11 个 java 文件 + 配置齐全）。若要改为服务器跑，**必须先建 `galgame_test` 隔离库**，绝不能连生产库。
+- **测试顺带发现并已修复的生产 bug（2026-09-20）**：`MentionService.MENTION_PATTERN` 的边界原用 `\p{L}`（**含汉字**），导致 `谢谢@某某` 这种「中文紧贴 @ 之前」的写法**完全匹配不到**，@ 通知静默丢失——中文论坛高频写法，影响面实在。
+  - **修法**：前后边界都改为只排除 **ASCII 词字符** `[A-Za-z0-9_]`（`(?<![A-Za-z0-9_])@([\p{L}\p{N}_]{2,20})(?![A-Za-z0-9_])`）。这样邮箱保护（`foo@bar.com` 里 @ 前是字母）与「`@` + 21 位不匹配」两条原行为都保留，只有中文不再被误挡。
+  - **贪婪歧义**：用户名本身可含中文（`@小明`），故字符类必须留 `\p{L}`；这也使 `@alice你好` 的候选串变成 `alice你好`（正则无法区分「用户名带中文」与「用户名后紧贴正文」）。新增 `MentionService.resolveUser(candidate)`：先按完整候选查库，未命中且候选含非 ASCII 字符时从右往左逐字符缩短重试（用户名最短 2 位），取第一个真实存在的用户；**纯 ASCII 候选不触发回退**，避免无谓的多次查询。
+  - **防回归测试**：`unit/MentionServiceTest`（`中文紧贴at之前也能解析出来`、`中文用户名后紧跟中文会被贪婪并入`）+ 新增 `integration/MentionNotificationIntegrationTest` 8 条端到端（中文紧贴 / @后紧贴中文 / 中文用户名 / @自己 / 重复@去重 / 邮箱不误报 / 不存在用户 / 评论里的@）。把正则改回旧版可让其中 4 条变红（已变异验证）。
+  - **已部署线上（2026-09-20）**：脚本 `D:\claude code\deploy_mention_fix_to_server.py`（凭据正则现场提取不落盘 → 备份旧 jar 到 `/root/backup/galgame-backend-BEFORE-MENTION-FIX.jar` → 上传 jar → 重启 8081 → 服务器本地冒烟 7 项 → 清理测试数据），**冒烟 7/7 PASS**、公网 200、启动 2.7s。⚠️ 该脚本的 start 命令必须用 `setsid nohup ... </dev/null &`——只用 `nohup` 时 java 会占住 paramiko channel 不放 EOF，`o.read()` 直接超时中断脚本（健康轮询与冒烟全不执行）；且读取要 try/except 容错，超时也应继续往下轮询而非中断。另外备份步骤要写成「已存在则跳过」，否则脚本重跑会把新 jar 覆盖进备份、丢掉真正的旧版本。
+
 ## Galgame 作品库（已完成完整 CRUD）
 - 接口：`GET /api/galgames`（列表 + q 名称搜索 + tags 多标签 **AND** 过滤，**只返回 approved**）、`GET /{id}`（详情）、`POST`（创建，登录用户，管理员→approved / 普通用户→pending）、`PUT /{id}`（编辑，`updated_at` 由 `ON UPDATE CURRENT_TIMESTAMP` 自动刷新；管理员可改一切，创建者仅 status≠approved 可改自己）、`DELETE /{id}`（管理员可删一切，创建者仅 pending 可删自己）、`POST /image`（封面上传，登录用户）。权限：401 未登录 / 403 无权 / 404（他人看非 approved）。
 - 前端：`/galgame` 列表卡点击进 `/galgame/:id` 详情页（`GalgameDetailView.vue`），管理员在详情页**内联编辑**（表单复用 AddGalgameView 字段：名称/4 组标签/封面上传/简介/制作人员/资源链接）+ **删除**（`ElMessageBox.confirm` 确认）。

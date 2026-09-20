@@ -1,6 +1,7 @@
 package com.galgame.service;
 
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -26,9 +27,19 @@ public class MentionService {
 
     private static final Logger log = LoggerFactory.getLogger(MentionService.class);
 
-    /** @用户名匹配：前后不能是字母/数字/下划线（避免匹配邮箱/路径里的 @），用户名 2~20 位 */
+    /**
+     * @用户名匹配：用户名 2~20 位（中英文 / 数字 / 下划线）。
+     * <p><b>前后边界都只排除 ASCII 词字符</b>（{@code A-Za-z0-9_}）：既能挡住邮箱（{@code foo@bar.com}）、
+     * {@code C:@users} 这类拼接，也能让超长用户名（{@code @} + 21 位）照旧不匹配，
+     * 同时不会误挡中文紧贴的情形。
+     * <p>⚠️ 2026-09-20 修复：前边界原为 {@code (?<![\p{L}\p{N}_])}，而 {@code \p{L}} **包含汉字**，
+     * 导致中文正文里紧贴的 @ 整段漏解析——「谢谢@某某」在中文论坛是高频写法，@ 通知就此静默丢失。
+     * <p>用户名本身可含中文（如 {@code @小明}），故字符类保留 {@code \p{L}}；这也意味着
+     * {@code @alice你好} 会把「你好」一并吞进候选串（正则无法区分「用户名带中文」与「用户名后紧贴正文」），
+     * 交由 {@link #resolveUser(String)} 从长到短回退试探，取第一个真实存在的用户。
+     */
     public static final Pattern MENTION_PATTERN =
-            Pattern.compile("(?<![\\p{L}\\p{N}_])@([\\p{L}\\p{N}_]{2,20})(?![\\p{L}\\p{N}_])");
+            Pattern.compile("(?<![A-Za-z0-9_])@([\\p{L}\\p{N}_]{2,20})(?![A-Za-z0-9_])");
 
     private final UserDao userDao;
     private final PostDao postDao;
@@ -59,8 +70,7 @@ public class MentionService {
             Set<Long> userIds = new LinkedHashSet<>();
             Matcher matcher = MENTION_PATTERN.matcher(content);
             while (matcher.find()) {
-                String username = matcher.group(1);
-                userDao.findByUsername(username).ifPresent(user -> {
+                resolveUser(matcher.group(1)).ifPresent(user -> {
                     if (user.id() != actorId) {
                         userIds.add(user.id());
                     }
@@ -80,5 +90,32 @@ public class MentionService {
         } catch (Exception e) {
             log.warn("解析 @提及并写入通知失败 actorId={} postId={} replyId={}", actorId, postId, replyId, e);
         }
+    }
+
+    /**
+     * 把正则捕获到的候选串解析成真实存在的用户。
+     * <p>候选串可能是「用户名 + 紧贴其后的正文中文」（{@code @alice你好} → 候选 {@code alice你好}），
+     * 故先按完整候选查库；未命中且在候选含非 ASCII 字符时，从右往左逐字符缩短重试
+     * （用户名最短 2 位），取第一个真实存在的用户。
+     * <p>纯 ASCII 候选未命中即放弃——不用回退（ASCII 用户名不会被中文粘住），避免无谓的多次查询。
+     * <p>例：{@code @小明你好} → 试「小明你好」→ 试「小明你」→「小明」命中。
+     */
+    private Optional<User> resolveUser(String candidate) {
+        Optional<User> direct = userDao.findByUsername(candidate);
+        if (direct.isPresent() || isAscii(candidate)) {
+            return direct;
+        }
+        for (int end = candidate.length() - 1; end >= 2; end--) {
+            Optional<User> shortened = userDao.findByUsername(candidate.substring(0, end));
+            if (shortened.isPresent()) {
+                return shortened;
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** 是否全为 ASCII 字符（用于判断候选串里有没有可能粘上正文中文） */
+    private static boolean isAscii(String value) {
+        return value.chars().allMatch(c -> c < 128);
     }
 }

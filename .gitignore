@@ -1,15 +1,40 @@
-# 前端
+# ══════════════════════════════════════════════════════════
+#  Galgame 论坛 —— Git 忽略规则
+#  原则：只提交「源码与配置模板」，绝不提交构建产物、运行时数据、凭据。
+# ══════════════════════════════════════════════════════════
+
+# ── 依赖与构建产物（可由源码重新生成）──────────────
 frontend/node_modules/
 frontend/dist/
-
-# 后端
 backend/target/
 
-# IDE
+# ── 运行时产生的数据（用户上传的附件、日志）────────
+# backend/uploads 是论坛运行中用户真实上传的头像/帖子图片等（约 41MB），
+# 属于运行时数据而非源码；日志同理。
+backend/uploads/
+*.log
+
+# ── 本地运行时数据（体积大且含真实用户数据）────────
+# database/mysql-data 是 MySQL 数据目录（约 470MB），含真实用户/帖子；
+# research/ 是收集的第三方参考项目（内含它们自己的 .git，约 96MB）；
+# backup/ 是历史备份快照（约 113MB）。三者都不属于本项目源码。
+database/mysql-data/
+database/*.log
+database/*.out
+backup/
+research/
+
+# ── 本地凭据（绝不入库）────────────────────────────
+# 数据库口令等敏感值放这里，由 application.properties 的
+# spring.config.import 按需加载；仓库只保留不含口令的模板。
+application-local.properties
+**/application-local.properties
+
+# ── IDE ──────────────────────────────────────────
 .idea/
 *.iml
 .vscode/
 
-# 系统
+# ── 系统 ─────────────────────────────────────────
 .DS_Store
 Thumbs.db
