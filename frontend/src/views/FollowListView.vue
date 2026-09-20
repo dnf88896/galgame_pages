@@ -54,6 +54,7 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 import { token, user, requireLogin } from '../store/user'
 import { resolveAssetUrl, getErrorMessage } from '../utils/format'
+import { goBack as navGoBack } from '../utils/navigation'
 
 const props = defineProps({
   tab: {
@@ -100,13 +101,10 @@ async function load() {
   }
 }
 
-// 返回：有后退记录则回上一页；否则（直接打开本页/刷新）兜底回 TA 的资料页
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push(`/user/${ownerId.value}`)
-  }
+  navGoBack(router, `/user/${ownerId.value}`)
 }
 
 // 列表中该行是否就是当前登录用户自己（避免出现「关注自己」按钮）

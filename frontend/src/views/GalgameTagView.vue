@@ -59,6 +59,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import { getErrorMessage } from '../utils/format'
+import { goBack as navGoBack } from '../utils/navigation'
 import { CATEGORY_LABELS, TAG_LIBRARY_CATEGORY_ORDER } from '../constants/galgameTag'
 
 const router = useRouter()
@@ -104,10 +105,9 @@ watch(keyword, () => {
   }, 300)
 })
 
-// 返回按钮：后退栈空（如直接输 URL 进入）时回 galgame 列表页
+// 返回按钮：有站内上一页就真后退，否则兜底回 galgame 列表页（见 utils/navigation.js 注释）
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/galgame')
+  navGoBack(router, '/galgame')
 }
 
 // 点击标签 chip → 标签详情页

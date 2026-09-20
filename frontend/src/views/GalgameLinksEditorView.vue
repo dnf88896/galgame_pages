@@ -63,6 +63,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import { loadDraft, saveDraft } from '../utils/galLinksDraft'
+import { goBack as navGoBack } from '../utils/navigation'
 
 const props = defineProps({ type: { type: String, default: 'staffs' } })
 const router = useRouter()
@@ -126,9 +127,10 @@ function done() {
   goBack()
 }
 
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/galgame')
+  navGoBack(router, '/galgame')
 }
 </script>
 

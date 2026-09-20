@@ -102,18 +102,15 @@ import api from '../api'
 import EmojiPicker from '../components/EmojiPicker.vue'
 import { user as currentUser, requireLogin } from '../store/user'
 import { formatTime, resolveAssetUrl, getErrorMessage } from '../utils/format'
+import { goBack as navGoBack } from '../utils/navigation'
 
 const route = useRoute()
 const router = useRouter()
 
-// 返回上一页：有后退记录则回退到进入私聊前的页面（消息列表 / 个人主页等）；
-// 无历史（如直接输 URL 打开本页）时兜底回消息列表。
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push('/messages')
-  }
+  navGoBack(router, '/messages')
 }
 
 const userId = computed(() => Number(route.params.userId))

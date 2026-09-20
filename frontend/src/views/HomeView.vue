@@ -272,7 +272,8 @@ const leftNavGroups = [
     { label: '通知', to: '/messages?tab=notifications' },
   ] },
   { label: '其他', children: [
-    { label: '话题排行', to: '/?sort=views' },
+    // homeSort：回首页「全部话题」并按指定方式排序（不能只用 to 跳 query，见 goHomeSorted）
+    { label: '话题排行', homeSort: 'hot' },
     { label: 'Galgame排行', to: '/galgame?sort=rating' },
     { label: '用户排行', to: '/user-ranking' },
   ] },
@@ -319,6 +320,18 @@ function onSortCommand(val) {
   sortBy.value = val
   load()
 }
+
+// URL 的 ?sort= 变化时同步排序：覆盖浏览器前进/后退、手改地址栏、以及从别处 push 进本页。
+// （goHomeSorted 里若已手动置位过 sortBy，这里值相同即直接返回，不会重复请求。）
+watch(
+  () => route.query.sort,
+  (v) => {
+    const next = HOME_SORTS.includes(v) ? v : 'time'
+    if (next === sortBy.value) return
+    sortBy.value = next
+    load()
+  },
+)
 
 const searchKeyword = ref('')
 let searchTimer = null
@@ -368,6 +381,25 @@ function goAllTopics() {
   activeCategory.value = ''
   load()
   router.push('/')
+}
+
+// 侧边栏「其他」组的排行入口：回首页显示「全部话题」并按指定方式排序（目前只有话题排行 → hot 热度）。
+// ⚠️ 不能只 router.push({query:{sort}}) 了事：HomeView 组件在首页是**复用**的，query 变了但组件
+// 不重建，而 sortBy 只在 setup 时读一次 route.query.sort —— 结果就是停在首页点它「点了没反应」
+// （从别的页面点进来才会生效，所以这个 bug 表现得时灵时不灵）。必须在点击时直接置位并 reload。
+function goHomeSorted(sort) {
+  if (route.path === '/') {
+    // 已在首页：清掉板块筛选与搜索词（= 全部话题），直接按新排序重拉
+    activeCategory.value = ''
+    searchKeyword.value = ''
+    sortBy.value = sort
+    // query 相同就别 push，vue-router 会抛 duplicated navigation
+    if (route.query.sort !== sort) router.push({ path: '/', query: { sort } })
+    load()
+    return
+  }
+  // 从别的页面来：push 后 HomeView 重新创建，sortBy 会从 query 读到 sort，由 onMounted 统一拉取
+  router.push({ path: '/', query: { sort } })
 }
 
 // 各分区帖子数（/api/boards），失败不阻塞页面
@@ -444,6 +476,10 @@ function onDrawerNavClick(child) {
 function onLeftNavChildClick(child) {
   if (child.all) {
     goAllTopics()
+    return
+  }
+  if (child.homeSort) {
+    goHomeSorted(child.homeSort)
     return
   }
   if (child.follow) {

@@ -641,6 +641,7 @@ import { token, user, requireLogin } from '../store/user'
 import { refreshMoe } from '../utils/moeGain'
 import { getErrorMessage, resolveAssetUrl, formatTime } from '../utils/format'
 import { saveDraft, loadDraft, clearDraft } from '../utils/galLinksDraft'
+import { goBack as navGoBack } from '../utils/navigation'
 import MentionTextarea from '../components/MentionTextarea.vue'
 import EmojiPicker from '../components/EmojiPicker.vue'
 import GalgameTagSelect from '../components/GalgameTagSelect.vue'
@@ -974,10 +975,10 @@ async function submitRating() {
   }
 }
 
-// 返回按钮：后退栈空（如直接输 URL 进入）时回列表页
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/galgame')
+  navGoBack(router, '/galgame')
 }
 
 // 进入编辑模式：用已加载详情数据回填表单

@@ -142,6 +142,7 @@ import { user } from '../store/user'
 import { refreshMoe } from '../utils/moeGain'
 import { getErrorMessage, resolveAssetUrl } from '../utils/format'
 import { saveDraft, loadDraft, clearDraft } from '../utils/galLinksDraft'
+import { goBack as navGoBack } from '../utils/navigation'
 import GalgameTagSelect from '../components/GalgameTagSelect.vue'
 import { GALGAME_CATEGORIES, CATEGORY_GROUPS } from '../constants/galgameCategory'
 
@@ -198,9 +199,10 @@ function openEditor(type) {
 const staffCount = computed(() => form.staffLinks.filter((l) => l.id != null).length)
 const charCount = computed(() => form.characterLinks.filter((l) => l.id != null).length)
 
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/galgame')
+  navGoBack(router, '/galgame')
 }
 
 function addLink() {

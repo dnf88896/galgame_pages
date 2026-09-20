@@ -179,8 +179,11 @@ async function loadPosts() {
   }
 }
 
+// 小分支页的「←」：优先真后退（通常退回大类页），无站内历史时兜底到大类页。
+// ⚠️ 不能用 router.push 模拟返回——push 会写入 state.back，大类页据此认为「有上一页」，
+// 它的返回按钮再 back() 就退回本页，两页来回跳成死循环。
 function goBackToCategory() {
-  router.push(`/tag/${route.params.category}`)
+  goBack(router, `/tag/${route.params.category}`)
 }
 function goPost(id) {
   router.push(`/post/${id}`)

@@ -54,6 +54,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import { getErrorMessage, resolveAssetUrl, formatTime } from '../utils/format'
+import { goBack as navGoBack } from '../utils/navigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -99,10 +100,10 @@ function avatarImgError(u) {
   if (u) u._avatarError = true
 }
 
-// 返回按钮：后退栈空（如直接输 URL 进入）时按实体类型回对应列表页
+// 返回按钮：有站内上一页就真后退，否则兜底替换到下方目标页
+// （判断依据与 replace 兜底的原因见 utils/navigation.js）
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/' + entryType)
+  navGoBack(router, '/' + entryType)
 }
 
 onMounted(loadContributors)
