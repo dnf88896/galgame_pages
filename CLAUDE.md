@@ -29,6 +29,14 @@
   - **防回归测试**：`unit/MentionServiceTest`（`中文紧贴at之前也能解析出来`、`中文用户名后紧跟中文会被贪婪并入`）+ 新增 `integration/MentionNotificationIntegrationTest` 8 条端到端（中文紧贴 / @后紧贴中文 / 中文用户名 / @自己 / 重复@去重 / 邮箱不误报 / 不存在用户 / 评论里的@）。把正则改回旧版可让其中 4 条变红（已变异验证）。
   - **已部署线上（2026-09-20）**：脚本 `D:\claude code\deploy_mention_fix_to_server.py`（凭据正则现场提取不落盘 → 备份旧 jar 到 `/root/backup/galgame-backend-BEFORE-MENTION-FIX.jar` → 上传 jar → 重启 8081 → 服务器本地冒烟 7 项 → 清理测试数据），**冒烟 7/7 PASS**、公网 200、启动 2.7s。⚠️ 该脚本的 start 命令必须用 `setsid nohup ... </dev/null &`——只用 `nohup` 时 java 会占住 paramiko channel 不放 EOF，`o.read()` 直接超时中断脚本（健康轮询与冒烟全不执行）；且读取要 try/except 容错，超时也应继续往下轮询而非中断。另外备份步骤要写成「已存在则跳过」，否则脚本重跑会把新 jar 覆盖进备份、丢掉真正的旧版本。
 
+## Git 版本控制（2026-09-20 建立）
+- **仓库**：`https://github.com/dnf88896/galgame_pages`（**public**）；本地 `galgame_pages/` 已是 git 仓库，远程名 `origin`，凭据走 `gh auth setup-git`（push 不用输密码）。
+- **分支**：`main` = 稳定/线上已部署版本；`dev` = 开发分支。
+- **tag**：`1.0.0` 指向首个纳入版本控制的提交（对应当前线上版本）。⚠️ `v0.1.0`~`0.1.7` 这 8 个旧 tag 指向一个只有 README 的空提交——**那些版本的代码从未纳入版本控制**，只存在于 release 的 rar 发布包里，历史无法重建。
+- **发新版**：`git tag -a v1.0.1 -m "..."` → `git push origin v1.0.1` → 再 `gh release create` 附 rar 包。
+- **入库范围（182 个文件，纯源码 + 配置）**：`.gitignore` 排除 `node_modules/` `dist/` `target/` `database/mysql-data/`（472M MySQL 数据）`backend/uploads/`（41M 用户上传附件）`research/`（内含嵌套 .git）`backup/` `*.log`；`.gitattributes` 统一 LF（`*.bat`/`*.cmd` 保持 CRLF）。
+- ⚠️ `backend/src/main/resources/application.properties` **含明文数据库口令且已入库**——这是用户明确的选择（当时给了四个方案：`.example` 模板 / 拆 `application-local` / 转 Private / 直接提交明文，用户选「直接提交明文」），**不是疏漏，不要自作主张去"修"**。另：9 个 release 的 rar 附件里打包了 `database/mysql-data/` 整个数据目录，属已知的历史暴露。
+
 ## Galgame 作品库（已完成完整 CRUD）
 - 接口：`GET /api/galgames`（列表 + q 名称搜索 + tags 多标签 **AND** 过滤，**只返回 approved**）、`GET /{id}`（详情）、`POST`（创建，登录用户，管理员→approved / 普通用户→pending）、`PUT /{id}`（编辑，`updated_at` 由 `ON UPDATE CURRENT_TIMESTAMP` 自动刷新；管理员可改一切，创建者仅 status≠approved 可改自己）、`DELETE /{id}`（管理员可删一切，创建者仅 pending 可删自己）、`POST /image`（封面上传，登录用户）。权限：401 未登录 / 403 无权 / 404（他人看非 approved）。
 - 前端：`/galgame` 列表卡点击进 `/galgame/:id` 详情页（`GalgameDetailView.vue`），管理员在详情页**内联编辑**（表单复用 AddGalgameView 字段：名称/4 组标签/封面上传/简介/制作人员/资源链接）+ **删除**（`ElMessageBox.confirm` 确认）。
