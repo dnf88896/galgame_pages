@@ -32,7 +32,7 @@
 ## Git 版本控制（2026-09-20 建立）
 - **仓库**：`https://github.com/dnf88896/galgame_pages`（**public**）；本地 `galgame_pages/` 已是 git 仓库，远程名 `origin`，凭据走 `gh auth setup-git`（push 不用输密码）。
 - **分支**：`main` = 稳定/线上已部署版本；`dev` = 开发分支。
-- **tag**：`1.0.0` 指向首个纳入版本控制的提交（对应当前线上版本）。⚠️ `v0.1.0`~`0.1.7` 这 8 个旧 tag 指向一个只有 README 的空提交——**那些版本的代码从未纳入版本控制**，只存在于 release 的 rar 发布包里，历史无法重建。
+- **tag**：`1.0.0`（首个纳入版本控制的提交）、`v1.0.1`（2026-09-20 发布，GitHub 上标记为 Latest，附件 267,152,376 字节，压缩包内已含 `.git` 目录）。⚠️ `v0.1.0`~`0.1.7` 这 8 个旧 tag 指向一个只有 README 的空提交——那 8 个版本的**代码从未直接入库**，但**完整源码存在于各自 release 的 rar 附件里**（路径形如 `galgame_pages\backend\src\main\java\...`，9 个包体积从 127MB 递增到 274MB，是 9 个时间点快照）；若需要那段历史，可解压提取后按时间顺序逐个提交重建。
 - **发新版**：`git tag -a v1.0.1 -m "..."` → `git push origin v1.0.1` → 再 `gh release create` 附 rar 包。
 - **入库范围（182 个文件，纯源码 + 配置）**：`.gitignore` 排除 `node_modules/` `dist/` `target/` `database/mysql-data/`（472M MySQL 数据）`backend/uploads/`（41M 用户上传附件）`research/`（内含嵌套 .git）`backup/` `*.log`；`.gitattributes` 统一 LF（`*.bat`/`*.cmd` 保持 CRLF）。
 - ⚠️ `backend/src/main/resources/application.properties` **含明文数据库口令且已入库**——这是用户明确的选择（当时给了四个方案：`.example` 模板 / 拆 `application-local` / 转 Private / 直接提交明文，用户选「直接提交明文」），**不是疏漏，不要自作主张去"修"**。另：9 个 release 的 rar 附件里打包了 `database/mysql-data/` 整个数据目录，属已知的历史暴露。
