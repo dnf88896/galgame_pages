@@ -160,6 +160,19 @@ public class PostDao {
                 (rs, i) -> Map.of("name", rs.getString("name"), "count", rs.getLong("count")));
     }
 
+    /** 各小分支标签的帖子数（一帖多标签会分别计数），供 /api/tags 标签树使用；无帖子的标签不出现在结果里 */
+    public Map<String, Long> countBySection() {
+        return jdbcTemplate.query(
+                "SELECT section_key AS k, COUNT(*) AS c FROM post_tags GROUP BY section_key",
+                rs -> {
+                    Map<String, Long> map = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        map.put(rs.getString("k"), rs.getLong("c"));
+                    }
+                    return map;
+                });
+    }
+
     public Optional<Post> findById(Long id) {
         List<Post> rows = new ArrayList<>(jdbcTemplate.query(
                 "SELECT " + BASE_COLUMNS + " FROM posts LEFT JOIN users u ON u.id = posts.user_id "
